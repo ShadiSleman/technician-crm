@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">מעקב לקוחות</string>
+    <string name="title_activity_main">מעקב לקוחות</string>
+    <string name="package_name">il.technician.mazganim</string>
+    <string name="custom_url_scheme">il.technician.mazganim</string>
+</resources>
