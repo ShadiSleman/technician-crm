@@ -1,33 +1,45 @@
-# Deploy the API so friends can use the APK (any network)
+# Deploy the API so the APK (and web) can use MongoDB from anywhere
 
-Your **PC at home is not on the public internet**. Friends on another Wi‑Fi cannot call `http://YOUR-PC:5050`.  
-**MongoDB Atlas is already public** — you only need to run this **Node API** on a host with a **public HTTPS URL**.
+Your **PC at home is not on the public internet**. The **Android app** only talks to your **HTTPS API**; the API talks to **MongoDB Atlas**.
 
-## Option A — Render (simple)
+## Option A — Render (recommended; blueprint included)
 
-1. Push `technician-crm-he` to GitHub (do **not** commit `.env`).
-2. [Render](https://render.com) → **New +** → **Web Service** → connect the repo.
-3. **Root Directory:** `technician-crm-he/server`
-4. **Runtime:** Docker (uses `Dockerfile`) **or** Native:
-   - Build: `npm install`
-   - Start: `npm start`
-5. **Environment variables** (same values as local `.env`):
-   - `MONGO_URI` — Atlas connection string (database e.g. `hvac-crm`)
-   - `JWT_SECRET` — long random string (16+ chars)
-6. Deploy. Copy the URL, e.g. `https://hvac-crm-api-xxxx.onrender.com`
-7. **API base for the app:** `https://hvac-crm-api-xxxx.onrender.com/api`  
-   - Put that into `technician-crm-he/public/app-config.json` as `apiBase`, **or** set `VITE_API_URL` before `npm run build`, **or** your friend types it on the login screen once.
+1. Push this repo to GitHub (never commit `.env` or `.env.production`).
+2. [Render](https://render.com) → **New +** → **Blueprint** → select the repo → confirm (uses `render.yaml` at repo root).
+3. Open the created **Web Service** → **Environment** → set:
+   - **`MONGO_URI`** — Atlas connection string (same idea as `server/.env.example`)
+   - **`JWT_SECRET`** — long random string (16+ characters)
+4. Wait for deploy → copy the service URL, e.g. `https://technician-crm-api.onrender.com`
+5. **API base for the app** = that URL + **`/api`**, e.g. `https://technician-crm-api.onrender.com/api`
+
+### Point the mobile/web build at the API
+
+1. Copy `.env.production.example` → `.env.production` in the **repo root**.
+2. Set `VITE_API_URL` to your API base (must include `/api`), e.g.  
+   `VITE_API_URL=https://technician-crm-api.onrender.com/api`
+3. From repo root: `npm run build:mobile` then `npm run android:apk` (or Android Studio → Build APK).
+
+Alternatively, set `"apiBase"` in `public/app-config.json` to the same URL and run `npm run build:mobile` (no `.env.production`).
+
+### Manual Render setup (no Blueprint)
+
+**New +** → **Web Service** → connect repo → **Docker** → **Dockerfile path:** `server/Dockerfile`, **Docker build context:** `server`. Add the same env vars as above.
+
+**Node (no Docker)** — pick **one** of these:
+
+1. **Root Directory = `server`:** Build `npm install` · Start `npm start`
+2. **Root Directory empty (repo root):** Build `npm install --prefix server` · Start `npm start`  
+   (Root `package.json` has `"start": "npm start --prefix server"` so the API still starts.)
 
 ## Option B — Fly.io, Railway, VPS
 
-Same idea: run `node src/index.js` (or Docker), set `PORT` from host if required, pass `MONGO_URI` and `JWT_SECRET`.
+Run `node src/index.js` or Docker from `server/`, set `PORT` from the host, pass `MONGO_URI` and `JWT_SECRET`.
 
 ## After deploy
 
-1. Run once (SSH or local with prod URI): `npm run seed:user -- admin YourSecurePassword`
-2. Build APK: edit `public/app-config.json` → `"apiBase": "https://your-service.../api"` →  
-   `npm run build && npx cap sync`
-3. Share the APK. Friends log in; data goes to **Atlas** through your hosted API.
+1. Seed a user once (from your machine, with server env or against prod):  
+   `cd server && npm run seed:user -- admin YourSecurePassword`
+2. Build and install the APK as above. Users log in; data flows **phone → API → Atlas**.
 
 ## Security
 

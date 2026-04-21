@@ -213,8 +213,10 @@ export function QuotesPage({
 
         <h2 className="section-title">הצעת מחיר חדשה</h2>
         <p className="muted section-subcount">
-          <strong>לקוח חובה</strong> לשמירה. בוחרים פריט מהמחירון — אחרי בחירה בשורה
-          האחרונה נפתחת שורה חדשה אוטומטית. ניתן להסיר שורות בלחיצה על «הסר».
+          <strong>לקוח חובה</strong> לשמירה. בכל שורה: <strong>כמות</strong>,{' '}
+          <strong>מחיר יחידה</strong>, <strong>מחיר שורה</strong> (כמות × יחידה).
+          המחירים מהמחירון כוללים מע״מ 18%. אחרי בחירה בשורה האחרונה נפתחת שורה
+          חדשה.
         </p>
         <div className="form-grid two">
           <div>
@@ -233,140 +235,127 @@ export function QuotesPage({
           </div>
         </div>
 
-        <div className="quote-lines-editor">
-          {quoteRows.map((row, i) => {
-            const item = row.priceListItemId
-              ? data.priceList.find((p) => p.id === row.priceListItemId)
-              : null
-            const lineForSum: QuoteLine | null = item
-              ? {
-                  priceListItemId: item.id,
-                  description: item.name,
-                  qty: row.qty,
-                  unitPriceInclVat: item.unitPriceInclVat,
-                }
-              : null
-
-            return (
-              <div key={row.rowKey} className="quote-line-row">
-                <div>
-                  <label className="field">פריט</label>
-                  <select
-                    value={row.priceListItemId ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setQuoteRows((rows) => {
-                        const next = rows.map((r, j) =>
-                          j === i
-                            ? {
-                                ...r,
-                                priceListItemId: v || null,
-                              }
-                            : r,
-                        )
-                        const isLast = i === rows.length - 1
-                        if (v && isLast) {
-                          return ensureTrailingEmptyRow(next)
-                        }
-                        return next
-                      })
-                    }}
-                  >
-                    <option value="">— בחרו פריט —</option>
-                    {priceListSorted.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name || '(ללא שם)'} — ₪
-                        {formatIls(p.unitPriceInclVat)}
-                      </option>
-                    ))}
-                  </select>
-                  {data.priceList.length === 0 ? (
-                    <p
-                      className="muted"
-                      style={{ marginTop: 8, fontSize: '0.85rem' }}
-                    >
-                      אין פריטים במחירון — הוסיפו בלשונית <strong>מחירון</strong>.
-                    </p>
-                  ) : null}
-                </div>
-
-                <div>
-                  <label className="field">כמות</label>
-                  <input
-                    inputMode="numeric"
-                    value={row.qty}
-                    disabled={!row.priceListItemId}
-                    onChange={(e) =>
-                      setQuoteRows((rows) =>
-                        rows.map((r, j) =>
-                          j === i
-                            ? {
-                                ...r,
-                                qty: Math.max(1, Number(e.target.value) || 1),
-                              }
-                            : r,
-                        ),
-                      )
+        {data.priceList.length === 0 ? (
+          <p className="muted" style={{ marginBottom: 8 }}>
+            אין פריטים במחירון — הוסיפו בלשונית <strong>מחירון</strong>.
+          </p>
+        ) : null}
+        <div className="table-wrap quote-editor-lines-wrap">
+          <table className="quote-editor-lines-table">
+            <thead>
+              <tr>
+                <th>פריט</th>
+                <th>כמות</th>
+                <th>מחיר יחידה ₪</th>
+                <th>מחיר ₪ (כמות×יחידה)</th>
+                <th aria-label="הסר שורה" />
+              </tr>
+            </thead>
+            <tbody>
+              {quoteRows.map((row, i) => {
+                const item = row.priceListItemId
+                  ? data.priceList.find((p) => p.id === row.priceListItemId)
+                  : null
+                const lineForSum: QuoteLine | null = item
+                  ? {
+                      priceListItemId: item.id,
+                      description: item.name,
+                      qty: row.qty,
+                      unitPriceInclVat: item.unitPriceInclVat,
                     }
-                  />
-                </div>
+                  : null
 
-                <div>
-                  <label className="field">מחיר יחידה ₪ (כולל מע״מ)</label>
-                  {item ? (
-                    <p
-                      className="quote-line-readonly-value"
-                      dir="ltr"
-                      style={{
-                        margin: 0,
-                        minHeight: 38,
-                        padding: '8px 10px',
-                        textAlign: 'left',
-                        borderRadius: 'var(--radius-sm)',
-                        border: '1px solid var(--border)',
-                        background: 'var(--surface2)',
-                      }}
-                    >
-                      ₪{formatIls(item.unitPriceInclVat)}
-                    </p>
-                  ) : (
-                    <p
-                      className="muted"
-                      style={{
-                        margin: 0,
-                        minHeight: 38,
-                        padding: '8px 10px',
-                        borderRadius: 'var(--radius-sm)',
-                        border: '1px dashed var(--border)',
-                      }}
-                    >
-                      —
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() =>
-                    setQuoteRows((rows) => {
-                      const next = rows.filter((_, j) => j !== i)
-                      return ensureTrailingEmptyRow(
-                        next.length === 0 ? [emptyRow()] : next,
-                      )
-                    })
-                  }
-                >
-                  הסר שורה
-                </button>
-
-                <div className="quote-line-sum">
-                  שורה: ₪
-                  {lineForSum ? formatIls(lineSum(lineForSum)) : '—'}
-                </div>
-              </div>
-            )
-          })}
+                return (
+                  <tr key={row.rowKey}>
+                    <td>
+                      <select
+                        className="table-inline-input quote-editor-select"
+                        value={row.priceListItemId ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          setQuoteRows((rows) => {
+                            const next = rows.map((r, j) =>
+                              j === i
+                                ? {
+                                    ...r,
+                                    priceListItemId: v || null,
+                                  }
+                                : r,
+                            )
+                            const isLast = i === rows.length - 1
+                            if (v && isLast) {
+                              return ensureTrailingEmptyRow(next)
+                            }
+                            return next
+                          })
+                        }}
+                      >
+                        <option value="">— בחרו פריט —</option>
+                        {priceListSorted.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name || '(ללא שם)'}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        className="table-inline-input quote-editor-qty"
+                        inputMode="numeric"
+                        value={row.qty}
+                        disabled={!row.priceListItemId}
+                        onChange={(e) =>
+                          setQuoteRows((rows) =>
+                            rows.map((r, j) =>
+                              j === i
+                                ? {
+                                    ...r,
+                                    qty: Math.max(
+                                      1,
+                                      Number(e.target.value) || 1,
+                                    ),
+                                  }
+                                : r,
+                            ),
+                          )
+                        }
+                      />
+                    </td>
+                    <td dir="ltr" className="quote-editor-num">
+                      {item ? (
+                        <>₪{formatIls(item.unitPriceInclVat)}</>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td dir="ltr" className="quote-editor-num quote-editor-line-total">
+                      {lineForSum ? (
+                        <>₪{formatIls(lineSum(lineForSum))}</>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost quote-editor-remove"
+                        onClick={() =>
+                          setQuoteRows((rows) => {
+                            const next = rows.filter((_, j) => j !== i)
+                            return ensureTrailingEmptyRow(
+                              next.length === 0 ? [emptyRow()] : next,
+                            )
+                          })
+                        }
+                      >
+                        הסר
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
         <div style={{ marginTop: 12 }}>
           <label className="field">הערות להצעה</label>
@@ -378,10 +367,14 @@ export function QuotesPage({
         </div>
 
         <p className="quote-total-banner">
-          סה״כ כולל מע״מ (18%):{' '}
-          <strong>
-            ₪{formatIls(linesTotal(quoteLinesPreview))}
-          </strong>
+          <span className="quote-total-main">
+            סה״כ:{' '}
+            <strong>₪{formatIls(linesTotal(quoteLinesPreview))}</strong>
+          </span>
+          <span className="muted quote-total-vat-note">
+            {' '}
+            (מחירים כוללים מע״מ 18%)
+          </span>
         </p>
         <button type="button" className="btn btn-primary" onClick={saveQuote}>
           שמור הצעת מחיר
@@ -407,7 +400,8 @@ export function QuotesPage({
                 <ul className="quote-lines-preview">
                   {q.lines.map((l, idx) => (
                     <li key={idx}>
-                      {l.description} × {l.qty} = ₪
+                      {l.description} — כמות {l.qty} — מחיר יחידה ₪
+                      {formatIls(l.unitPriceInclVat)} — מחיר ₪
                       {formatIls(lineSum(l))}
                     </li>
                   ))}
@@ -476,7 +470,8 @@ export function QuotesPage({
                   <tr>
                     <th>תיאור</th>
                     <th>כמות</th>
-                    <th>סה״כ שורה ₪ (כולל מע״מ)</th>
+                    <th>מחיר יחידה ₪</th>
+                    <th>מחיר ₪ (כמות × יחידה)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -486,6 +481,7 @@ export function QuotesPage({
                       <tr key={idx}>
                         <td>{l.description}</td>
                         <td>{l.qty}</td>
+                        <td dir="ltr">₪{formatIls(l.unitPriceInclVat)}</td>
                         <td dir="ltr">
                           <strong>₪{formatIls(line.incl)}</strong>
                         </td>
@@ -497,19 +493,19 @@ export function QuotesPage({
                     return (
                       <>
                         <tr className="quote-print-summary">
-                          <td colSpan={2}>סה״כ לפני מע״מ</td>
+                          <td colSpan={3}>סה״כ לפני מע״מ</td>
                           <td dir="ltr">
                             ₪{formatIls(b.ex)}
                           </td>
                         </tr>
                         <tr className="quote-print-summary">
-                          <td colSpan={2}>מע״מ (18%)</td>
+                          <td colSpan={3}>מע״מ (18%)</td>
                           <td dir="ltr">
                             ₪{formatIls(b.vat)}
                           </td>
                         </tr>
                         <tr className="quote-print-summary quote-print-summary--final">
-                          <td colSpan={2}>סה״כ לתשלום (כולל מע״מ)</td>
+                          <td colSpan={3}>סה״כ לתשלום (כולל מע״מ)</td>
                           <td dir="ltr">
                             ₪{formatIls(b.incl)}
                           </td>

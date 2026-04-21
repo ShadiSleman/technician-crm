@@ -1,6 +1,6 @@
 export function BootSplash() {
   return (
-    <div className="login-screen">
+    <div className="boot-splash">
       <p className="muted" style={{ textAlign: 'center' }}>
         Loading…
       </p>

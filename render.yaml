@@ -1,0 +1,22 @@
+# Render Blueprint: deploy the Node API (server/) with Docker.
+# Dashboard: New → Blueprint → connect repo → Render reads this file.
+# After deploy, set secrets in the service: MONGO_URI, JWT_SECRET (see server/.env.example).
+
+services:
+  - type: web
+    name: technician-crm-api
+    runtime: docker
+    region: frankfurt
+    plan: free
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false

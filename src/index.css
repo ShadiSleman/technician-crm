@@ -1463,20 +1463,25 @@ tr:last-child td {
   padding: 3px 5px;
 }
 
-/* תיאור / כמות / סה״כ שורה (3 עמודות בטבלת הדפסה) */
+/* תיאור / כמות / מחיר יחידה / מחיר שורה (4 עמודות בטבלת הדפסה PDF) */
 .quote-pdf-capture-root .quote-print-table th:nth-child(1),
 .quote-pdf-capture-root .quote-print-table td:nth-child(1) {
-  width: 52%;
+  width: 38%;
 }
 
 .quote-pdf-capture-root .quote-print-table th:nth-child(2),
 .quote-pdf-capture-root .quote-print-table td:nth-child(2) {
-  width: 12%;
+  width: 10%;
 }
 
 .quote-pdf-capture-root .quote-print-table th:nth-child(3),
 .quote-pdf-capture-root .quote-print-table td:nth-child(3) {
-  width: 36%;
+  width: 22%;
+}
+
+.quote-pdf-capture-root .quote-print-table th:nth-child(4),
+.quote-pdf-capture-root .quote-print-table td:nth-child(4) {
+  width: 30%;
 }
 
 .quote-pdf-capture-root .quote-print-notes {
@@ -1568,6 +1573,67 @@ tr:last-child td {
   margin: 16px 0;
 }
 
+/* עורך «הצעת מחיר חדשה» — טבלה: פריט | כמות | מחיר יחידה | מחיר שורה */
+.quote-editor-lines-wrap {
+  margin: 12px 0 18px;
+}
+
+.quote-editor-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+}
+
+.quote-editor-lines-table th,
+.quote-editor-lines-table td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  vertical-align: middle;
+  text-align: right;
+}
+
+.quote-editor-lines-table thead th {
+  background: var(--surface2);
+  font-weight: 600;
+}
+
+.quote-editor-lines-table .quote-editor-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quote-editor-line-total {
+  font-weight: 700;
+}
+
+.quote-editor-remove {
+  padding: 5px 8px;
+  font-size: 0.82rem;
+}
+
+.quote-editor-select.table-inline-input {
+  max-width: none;
+  width: 100%;
+  min-width: 160px;
+}
+
+.quote-editor-qty.table-inline-input {
+  width: 4.25rem;
+  max-width: 100%;
+  text-align: center;
+}
+
+@media (max-width: 639px) {
+  .quote-editor-lines-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .quote-editor-lines-table {
+    min-width: 480px;
+  }
+}
+
 .quote-line-row {
   display: grid;
   gap: 10px;
@@ -1610,7 +1676,7 @@ tr:last-child td {
 
 @media (min-width: 640px) {
   .quote-line-row {
-    grid-template-columns: minmax(0, 1.6fr) 0.42fr 0.95fr auto;
+    grid-template-columns: minmax(0, 1.6fr) 0.42fr 0.95fr 0.95fr auto;
     align-items: end;
   }
 
@@ -1635,6 +1701,15 @@ tr:last-child td {
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent2) 15%, var(--surface2));
   border: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.quote-total-vat-note {
+  font-size: 0.88rem;
+  font-weight: 400;
 }
 
 .quote-lines-preview {
@@ -1807,7 +1882,17 @@ tr:last-child td {
   }
 }
 
-/* מסך התחברות (מצב שרת) */
+/* טעינה ראשונית */
+.boot-splash {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(165deg, var(--bg0), var(--bg1));
+}
+
+/* legacy — נשמר לתאימות אם יופיעו מסכים ישנים */
 .login-screen {
   min-height: 100vh;
   display: flex;

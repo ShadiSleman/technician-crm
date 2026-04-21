@@ -209,7 +209,8 @@ export function QuoteReadyTemplate({ priceList, customers = [] }: Props) {
               <tr>
                 <th>פריט</th>
                 <th>כמות</th>
-                <th>סה״כ שורה ₪ (כולל מע״מ)</th>
+                <th>מחיר יחידה ₪</th>
+                <th>מחיר ₪ (כמות × יחידה)</th>
                 <th aria-label="הסר שורה" />
               </tr>
             </thead>
@@ -276,6 +277,13 @@ export function QuoteReadyTemplate({ priceList, customers = [] }: Props) {
                           )
                         }
                       />
+                    </td>
+                    <td dir="ltr" style={{ textAlign: 'left' }}>
+                      {item ? (
+                        <span>₪{formatIls(item.unitPriceInclVat)}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                     <td dir="ltr" style={{ textAlign: 'left' }}>
                       {line ? (
@@ -365,13 +373,14 @@ export function QuoteReadyTemplate({ priceList, customers = [] }: Props) {
                   <tr>
                     <th>תיאור</th>
                     <th>כמות</th>
-                    <th>סה״כ שורה ₪ (כולל מע״מ)</th>
+                    <th>מחיר יחידה ₪</th>
+                    <th>מחיר ₪ (כמות × יחידה)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filledRows.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="muted">
+                      <td colSpan={4} className="muted">
                         {' '}
                       </td>
                     </tr>
@@ -392,6 +401,7 @@ export function QuoteReadyTemplate({ priceList, customers = [] }: Props) {
                             <tr key={r.rowKey}>
                               <td>{item.name}</td>
                               <td>{r.qty}</td>
+                              <td dir="ltr">₪{formatIls(item.unitPriceInclVat)}</td>
                               <td dir="ltr">
                                 <strong>
                                   ₪{formatIls(line.incl)}
@@ -401,19 +411,19 @@ export function QuoteReadyTemplate({ priceList, customers = [] }: Props) {
                           )
                         })}
                       <tr className="quote-print-summary">
-                        <td colSpan={2}>סה״כ לפני מע״מ</td>
+                        <td colSpan={3}>סה״כ לפני מע״מ</td>
                         <td dir="ltr">
                           ₪{formatIls(templateBreakdown.ex)}
                         </td>
                       </tr>
                       <tr className="quote-print-summary">
-                        <td colSpan={2}>מע״מ (18%)</td>
+                        <td colSpan={3}>מע״מ (18%)</td>
                         <td dir="ltr">
                           ₪{formatIls(templateBreakdown.vat)}
                         </td>
                       </tr>
                       <tr className="quote-print-summary quote-print-summary--final">
-                        <td colSpan={2}>סה״כ לתשלום (כולל מע״מ)</td>
+                        <td colSpan={3}>סה״כ לתשלום (כולל מע״מ)</td>
                         <td dir="ltr">
                           ₪{formatIls(templateBreakdown.incl)}
                         </td>

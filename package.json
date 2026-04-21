@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "npm start --prefix server",
     "dev": "vite",
     "dev:api": "npm run dev --prefix server",
     "dev:all": "concurrently -n api,web -c cyan,magenta \"npm run dev --prefix server\" \"vite\"",
     "build": "tsc -b && vite build",
+    "build:mobile": "npm run build && npx cap sync",
     "lint": "eslint .",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",

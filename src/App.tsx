@@ -36,7 +36,6 @@ import type {
   Transaction,
   WorkGroup,
 } from './types'
-import { clearStoredApiBase } from './api/apiBase'
 import { formatIls } from './quoteUtils'
 import {
   PRIORITY_ORDER,
@@ -271,8 +270,16 @@ export default function App({
               body: JSON.stringify({ data }),
             })
             if (r.status === 401) onRemoteLogout()
-          } catch {
-            /* נשמר מקומית */
+            else if (!r.ok) {
+              const errText = await r.text().catch(() => '')
+              console.warn(
+                '[CRM] שמירה לשרת נכשלה',
+                r.status,
+                errText.slice(0, 200),
+              )
+            }
+          } catch (e) {
+            console.warn('[CRM] שמירה לשרת — שגיאת רשת', e)
           }
         })()
       }, 600)
@@ -903,31 +910,6 @@ export default function App({
         <div className="app-brand">
           <h1 className="app-title">מעקב לקוחות · מזגנים</h1>
           <div className="app-header-actions">
-            <span className="app-badge">
-              {isRemote ? 'מסונכרן לשרת' : 'דמו אינטראקטיבי'}
-            </span>
-            {isRemote && onRemoteLogout ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost header-mini-btn"
-                  onClick={() => {
-                    clearStoredApiBase()
-                    onRemoteLogout()
-                  }}
-                  title="Clear saved API URL and log out"
-                >
-                  שרת API
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost header-mini-btn"
-                  onClick={onRemoteLogout}
-                >
-                  יציאה
-                </button>
-              </>
-            ) : null}
             <button
               type="button"
               className="btn btn-ghost header-mini-btn"

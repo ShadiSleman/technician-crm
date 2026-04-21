@@ -7,7 +7,7 @@ function trimBase(url: string): string {
 
 /**
  * Order: saved URL on device → Vite env → dev-only localhost fallback.
- * Production Android: set URL once on the login screen, or bake VITE_API_URL at build time.
+ * Production: bake VITE_API_URL at build time (see .env.production / app-config.json).
  */
 export function getResolvedApiBase(): string {
   if (typeof window === 'undefined') return ''
