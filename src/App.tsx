@@ -1,7 +1,7 @@
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnalysisCharts } from './components/AnalysisCharts'
 import { ColorLegend } from './components/ColorLegend'
 import { PriceCatalogPage } from './components/PriceCatalogPage'
@@ -203,6 +203,31 @@ export default function App({
     customerId: string
     nonce: number
   } | null>(null)
+
+  const refreshWorkspaceFromServer = useCallback(async () => {
+    if (!isRemote || !remoteApiBase || !remoteToken || !onRemoteLogout) return
+    try {
+      const r = await fetch(`${remoteApiBase}/workspace`, {
+        headers: { Authorization: `Bearer ${remoteToken}` },
+      })
+      if (r.status === 401) {
+        onRemoteLogout()
+        return
+      }
+      if (!r.ok) {
+        alert('רענון מהענן נכשל. נסו שוב עוד מעט.')
+        return
+      }
+      const body = (await r.json()) as { data?: unknown }
+      const normalized = normalizeAppData(
+        (body.data ?? null) as Partial<AppData> | null,
+      )
+      setData(mergeInitialPriceListSeed(normalized))
+    } catch (e) {
+      console.warn('[CRM] רענון משרת', e)
+      alert('שגיאת רשת — לא נטענו עדכונים.')
+    }
+  }, [isRemote, remoteApiBase, remoteToken, onRemoteLogout])
 
   useEffect(() => {
     if (!isRemote || !remoteApiBase || !remoteToken || !onRemoteLogout) {
@@ -1313,6 +1338,8 @@ export default function App({
           setData={setData}
           quotesCustomerFocus={quotesCustomerFocus}
           onQuotesCustomerFocusApplied={() => setQuotesCustomerFocus(null)}
+          isRemote={isRemote}
+          onRefreshFromServer={isRemote ? refreshWorkspaceFromServer : undefined}
         />
       )}
 

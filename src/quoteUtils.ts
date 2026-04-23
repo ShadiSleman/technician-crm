@@ -1,4 +1,4 @@
-import type { QuoteLine } from './types'
+import type { PriceListItem, Quote, QuoteLine } from './types'
 
 /** תצוגת שקלים: שתי ספרות אחרי הנקודה (לא שלוש) */
 export function formatIls(amount: number): string {
@@ -42,5 +42,29 @@ export function emptyQuoteLine(): QuoteLine {
     description: '',
     qty: 1,
     unitPriceInclVat: 0,
+  }
+}
+
+/** מעדכן תיאור ומחיר שורה לפי מחירון (אחרי שינוי בלשונית «מחירון») */
+export function refreshQuoteFromPriceList(
+  q: Quote,
+  priceList: PriceListItem[],
+): Quote {
+  const lines: QuoteLine[] = q.lines.map((l) => {
+    if (!l.priceListItemId) return l
+    const item = priceList.find((p) => p.id === l.priceListItemId)
+    if (!item) return l
+    return {
+      ...l,
+      description: item.name,
+      unitPriceInclVat: item.unitPriceInclVat,
+    }
+  })
+  const now = new Date().toISOString()
+  return {
+    ...q,
+    lines,
+    totalInclVat: linesTotal(lines),
+    updatedAt: now,
   }
 }

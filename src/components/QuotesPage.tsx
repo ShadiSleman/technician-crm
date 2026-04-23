@@ -6,6 +6,7 @@ import {
   lineSum,
   lineVatBreakdown,
   linesTotal,
+  refreshQuoteFromPriceList,
   totalVatBreakdown,
 } from '../quoteUtils'
 import {
@@ -13,9 +14,8 @@ import {
   shareOrDownloadPdf,
   waitAnimationFrames,
 } from '../shareQuotePdf'
-import type { AppData, Customer, Quote, QuoteLine } from '../types'
+import type { AppData, Customer, PriceListItem, Quote, QuoteLine } from '../types'
 import { AiadLogoMark } from './AiadLogoMark'
-import { QuoteReadyTemplate } from './QuoteReadyTemplate'
 
 export type QuotesCustomerFocus = {
   customerId: string
@@ -28,6 +28,9 @@ type Props = {
   /** מכרטיס לקוח: לבחור לקוח בעורך הצעה חדשה */
   quotesCustomerFocus?: QuotesCustomerFocus | null
   onQuotesCustomerFocusApplied?: () => void
+  /** אחרי שינויים ב-Mongo / מכשיר אחר: רענון מלא מ-workspace */
+  isRemote?: boolean
+  onRefreshFromServer?: () => void | Promise<void>
 }
 
 /** שורה בעורך — רק מזהה ממחירון וכמות (תיאור/מחיר נמשכים מהמחירון בשמירה) */
@@ -55,19 +58,31 @@ function ensureTrailingEmptyRow(rows: CatalogQuoteRow[]): CatalogQuoteRow[] {
   return rows
 }
 
+function linePriceStale(l: QuoteLine, priceList: PriceListItem[]): boolean {
+  if (!l.priceListItemId) return false
+  const p = priceList.find((x) => x.id === l.priceListItemId)
+  if (!p) return true
+  return (
+    p.unitPriceInclVat !== l.unitPriceInclVat || (p.name || '') !== l.description
+  )
+}
+
 export function QuotesPage({
   data,
   setData,
   quotesCustomerFocus,
   onQuotesCustomerFocusApplied,
+  isRemote,
+  onRefreshFromServer,
 }: Props) {
   const [quoteCustomerId, setQuoteCustomerId] = useState('')
   const [quoteRows, setQuoteRows] = useState<CatalogQuoteRow[]>(() =>
     ensureTrailingEmptyRow([emptyRow()]),
   )
   const [quoteNotes, setQuoteNotes] = useState('')
-  const [printQuoteId, setPrintQuoteId] = useState<string | null>(null)
+  const [printBuffer, setPrintBuffer] = useState<Quote | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const customersSorted = useMemo(
     () =>
@@ -105,6 +120,44 @@ export function QuotesPage({
     }
     return out
   }, [quoteRows, data.priceList])
+
+  const draftAsQuote: Quote | null = useMemo(() => {
+    if (quoteLinesPreview.length === 0) return null
+    const c = data.customers.find((x) => x.id === quoteCustomerId)
+    const now = new Date().toISOString()
+    return {
+      id: 'draft',
+      customerId: quoteCustomerId || null,
+      customerNameSnapshot: c?.name ?? '',
+      customerPhoneSnapshot: c?.phone ?? '',
+      lines: quoteLinesPreview,
+      totalInclVat: linesTotal(quoteLinesPreview),
+      notes: quoteNotes.trim(),
+      createdAt: now,
+      updatedAt: now,
+    }
+  }, [quoteLinesPreview, quoteCustomerId, data.customers, quoteNotes])
+
+  async function handleRefreshFromServer() {
+    if (!onRefreshFromServer) return
+    setRefreshing(true)
+    try {
+      await onRefreshFromServer()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  function applyCatalogPricesToQuote(quoteId: string) {
+    setData((d) => ({
+      ...d,
+      quotes: d.quotes.map((q) =>
+        q.id === quoteId
+          ? refreshQuoteFromPriceList(q, d.priceList)
+          : q,
+      ),
+    }))
+  }
 
   function saveQuote() {
     if (!quoteCustomerId) {
@@ -159,25 +212,25 @@ export function QuotesPage({
     setData((d) => ({ ...d, quotes: d.quotes.filter((q) => q.id !== id) }))
   }
 
-  function printQuote(q: Quote) {
-    setPrintQuoteId(q.id)
+  function openPrintForQuote(q: Quote) {
+    setPrintBuffer(q)
     setTimeout(() => {
       window.print()
-      setTimeout(() => setPrintQuoteId(null), 400)
+      setTimeout(() => setPrintBuffer(null), 400)
     }, 200)
   }
 
-  async function shareSavedQuotePdf(q: Quote) {
+  async function shareAsPdf(q: Quote) {
     if (q.lines.length === 0) {
-      alert('אין שורות בהצעה זו.')
+      alert('אין שורות.')
       return
     }
     setPdfBusy(true)
-    setPrintQuoteId(q.id)
+    setPrintBuffer(q)
     await waitAnimationFrames(3)
     try {
       const el = document.querySelector(
-        '[data-quote-pdf-capture="saved"]',
+        '[data-quote-pdf-capture="quote-print"]',
       ) as HTMLElement | null
       if (!el) throw new Error('capture root missing')
       const blob = await elementToPdfBlob(el)
@@ -193,30 +246,41 @@ export function QuotesPage({
         'לא הצלחנו ליצור או לשתף PDF. נסו «הדפס / PDF» ובחרו שמירה כ־PDF.',
       )
     } finally {
-      setPrintQuoteId(null)
+      setPrintBuffer(null)
       setPdfBusy(false)
     }
   }
 
-  const quoteForPrint =
-    printQuoteId != null
-      ? data.quotes.find((q) => q.id === printQuoteId)
-      : null
-
   return (
     <>
       <main>
-        <QuoteReadyTemplate
-          priceList={data.priceList}
-          customers={data.customers}
-        />
+        <p className="muted section-subcount" style={{ marginTop: 0 }}>
+          <strong>ההצעות</strong> נשמרות <strong>בחשבון שלך</strong> (ענן) בכל מכשיר
+          שבו אותו משתמש מחובר. המחירים בטבלאות נלקחים מהמחירון בעת העריכה; בהצעה
+          <strong> שמורה</strong> נשמרים מחירי רגע השמירה — לעדכן אחרי שינוי
+          מחירון, לחצו <strong>«עדכן מחירים מהמחירון»</strong> בכרטיס.
+        </p>
+        {isRemote && onRefreshFromServer ? (
+          <div className="toolbar" style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void handleRefreshFromServer()}
+              disabled={refreshing}
+            >
+              {refreshing ? 'טוען מהענן…' : 'רענן נתונים מהענן'}
+            </button>
+            <span className="muted" style={{ fontSize: '0.9rem' }}>
+              אם ערכת ב-Mongo או במכשיר אחר, רענון ימשוך את הגרסה האחרונה.
+            </span>
+          </div>
+        ) : null}
 
         <h2 className="section-title">הצעת מחיר חדשה</h2>
         <p className="muted section-subcount">
-          <strong>לקוח חובה</strong> לשמירה. בכל שורה: <strong>כמות</strong>,{' '}
-          <strong>מחיר יחידה</strong>, <strong>מחיר שורה</strong> (כמות × יחידה).
-          המחירים מהמחירון כוללים מע״מ 18%. אחרי בחירה בשורה האחרונה נפתחת שורה
-          חדשה.
+          <strong>לקוח חובה</strong> לשמירה. הוסיפו שורות מהמחירון, ואז{' '}
+          <strong>שמור הצעת מחיר</strong> — השמירה מסתנכרנת אוטומטית לענן.
+          (מחירי יחידה משתנים בזמן אמת לפי לשונית <strong>מחירון</strong>.)
         </p>
         <div className="form-grid two">
           <div>
@@ -376,9 +440,34 @@ export function QuotesPage({
             (מחירים כוללים מע״מ 18%)
           </span>
         </p>
-        <button type="button" className="btn btn-primary" onClick={saveQuote}>
-          שמור הצעת מחיר
-        </button>
+        <div
+          className="toolbar"
+          style={{ marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}
+        >
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={saveQuote}
+          >
+            שמור הצעת מחיר
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!draftAsQuote}
+            onClick={() => draftAsQuote && openPrintForQuote(draftAsQuote)}
+          >
+            הדפס (טיוטה)
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!draftAsQuote || pdfBusy}
+            onClick={() => draftAsQuote && void shareAsPdf(draftAsQuote)}
+          >
+            {pdfBusy ? 'מכין…' : 'שתף PDF (טיוטה)'}
+          </button>
+        </div>
 
         <h2 className="section-title">הצעות שמורות</h2>
         <div className="list">
@@ -407,12 +496,25 @@ export function QuotesPage({
                   ))}
                 </ul>
                 {q.notes ? <p className="meta">{q.notes}</p> : null}
+                {q.lines.some((l) => linePriceStale(l, data.priceList)) ? (
+                  <p className="meta" style={{ color: 'var(--pri-high, #f59e0b)' }}>
+                    מחיר או שם בלשונית «מחירון» השתנו — ליישר את ההצעה הישנה לחצו
+                    &quot;עדכן מחירים מהמחירון&quot;.
+                  </p>
+                ) : null}
                 <div className="actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => applyCatalogPricesToQuote(q.id)}
+                  >
+                    עדכן מחירים מהמחירון
+                  </button>
                   <button
                     type="button"
                     className="btn btn-primary"
                     disabled={pdfBusy}
-                    onClick={() => void shareSavedQuotePdf(q)}
+                    onClick={() => void shareAsPdf(q)}
                   >
                     {pdfBusy ? 'מכין PDF…' : 'שתף PDF'}
                   </button>
@@ -420,9 +522,9 @@ export function QuotesPage({
                     type="button"
                     className="btn"
                     disabled={pdfBusy}
-                    onClick={() => printQuote(q)}
+                    onClick={() => openPrintForQuote(q)}
                   >
-                    הדפס / PDF
+                    הדפס
                   </button>
                   <button
                     type="button"
@@ -439,11 +541,11 @@ export function QuotesPage({
         </div>
       </main>
 
-      {quoteForPrint ? (
+      {printBuffer ? (
         <div className="print-quote-portal" aria-hidden>
           <div
             className="quote-print-sheet quote-print-sheet--solo quote-pdf-capture-root"
-            data-quote-pdf-capture="saved"
+            data-quote-pdf-capture="quote-print"
           >
             <div className="quote-brand-watermark" aria-hidden>
               איאד מזגנים
@@ -455,15 +557,15 @@ export function QuotesPage({
               <h1 className="quote-print-title">הצעת מחיר</h1>
               <p>
                 <strong>לכבוד:</strong>{' '}
-                {quoteForPrint.customerNameSnapshot || '—'}
+                {printBuffer.customerNameSnapshot || '—'}
               </p>
               <p>
                 <strong>טלפון:</strong>{' '}
-                {quoteForPrint.customerPhoneSnapshot || '—'}
+                {printBuffer.customerPhoneSnapshot || '—'}
               </p>
               <p>
                 <strong>תאריך:</strong>{' '}
-                {formatHebYmd(quoteForPrint.createdAt.slice(0, 10))}
+                {formatHebYmd(printBuffer.createdAt.slice(0, 10))}
               </p>
               <table className="quote-print-table">
                 <thead>
@@ -475,7 +577,7 @@ export function QuotesPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {quoteForPrint.lines.map((l, idx) => {
+                  {printBuffer.lines.map((l, idx) => {
                     const line = lineVatBreakdown(l.qty, l.unitPriceInclVat)
                     return (
                       <tr key={idx}>
@@ -489,7 +591,7 @@ export function QuotesPage({
                     )
                   })}
                   {(() => {
-                    const b = totalVatBreakdown(quoteForPrint.totalInclVat)
+                    const b = totalVatBreakdown(printBuffer.totalInclVat)
                     return (
                       <>
                         <tr className="quote-print-summary">
@@ -515,8 +617,8 @@ export function QuotesPage({
                   })()}
                 </tbody>
               </table>
-              {quoteForPrint.notes ? (
-                <p className="quote-print-notes">{quoteForPrint.notes}</p>
+              {printBuffer.notes ? (
+                <p className="quote-print-notes">{printBuffer.notes}</p>
               ) : null}
               <p className="quote-print-brand-footer">איאד מזגנים</p>
             </div>
