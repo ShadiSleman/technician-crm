@@ -17,8 +17,17 @@ async function main() {
   }
 
   const uri = getMongoUri()
-  await mongoose.connect(uri)
-  console.log('MongoDB:', mongoose.connection.name)
+  await mongoose.connect(uri, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 20_000,
+  })
+  mongoose.connection.on('error', (err) => {
+    console.error('MongoDB error:', err.message)
+  })
+  mongoose.connection.on('disconnected', () => {
+    console.warn('MongoDB disconnected, reconnecting…')
+  })
+  console.log('MongoDB:', mongoose.connection.name, `(readyState: ${mongoose.connection.readyState})`)
 
   const app = express()
   if (process.env.TRUST_PROXY === '1' || process.env.NODE_ENV === 'production') {

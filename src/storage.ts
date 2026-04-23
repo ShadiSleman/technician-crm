@@ -90,10 +90,10 @@ export function dedupePriceList(items: PriceListItem[]): PriceListItem[] {
 }
 
 export function normalizeAppData(raw: Partial<AppData> | null): AppData {
-  if (!raw || !Array.isArray(raw.customers)) return emptyAppData()
+  if (!raw || typeof raw !== 'object') return emptyAppData()
   const rawPl = Array.isArray(raw.priceList) ? raw.priceList : []
   return {
-    customers: raw.customers,
+    customers: Array.isArray(raw.customers) ? raw.customers : [],
     transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
     meetings: Array.isArray(raw.meetings) ? raw.meetings : [],
     callLogs: Array.isArray(raw.callLogs) ? raw.callLogs : [],

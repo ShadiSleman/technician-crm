@@ -220,15 +220,25 @@ export default function App({
           onRemoteLogout()
           return
         }
-        if (!r.ok) throw new Error('workspace')
+        if (!r.ok) {
+          console.warn('[CRM] טעינה מהשרת', r.status, '— מציג נתונים מקומיים')
+          if (!cancelled) {
+            setData(mergeInitialPriceListSeed(loadAppData()))
+            remoteHydrated.current = true
+          }
+          return
+        }
         const body = (await r.json()) as { data?: unknown }
         if (cancelled) return
         const normalized = normalizeAppData(
           (body.data ?? null) as Partial<AppData> | null,
         )
         setData(mergeInitialPriceListSeed(normalized))
-      } catch {
-        onRemoteLogout()
+      } catch (e) {
+        console.warn('[CRM] טעינה מהשרת — שגיאת רשת, נתונים מקומיים', e)
+        if (!cancelled) {
+          setData(mergeInitialPriceListSeed(loadAppData()))
+        }
       } finally {
         if (!cancelled) remoteHydrated.current = true
       }
