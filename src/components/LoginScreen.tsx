@@ -1,26 +1,10 @@
 import { useState, type FormEvent } from 'react'
+import { fetchAuthLogin } from '../api/authLogin'
 
 type Props = {
   apiBase: string
   initialError?: string
   onLoggedIn: (token: string) => void
-}
-
-async function postLogin(
-  base: string,
-  username: string,
-  password: string,
-): Promise<{ token?: string; error?: string }> {
-  const r = await fetch(`${base.replace(/\/+$/, '')}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-  const body = (await r.json()) as { token?: string; error?: string }
-  if (!r.ok || !body.token) {
-    return { error: body.error || 'התחברות נכשלה' }
-  }
-  return { token: body.token }
 }
 
 /**
@@ -40,11 +24,11 @@ export function LoginScreen({ apiBase, initialError, onLoggedIn }: Props) {
     setErr(null)
     setLoading(true)
     try {
-      const res = await postLogin(apiBase, u.trim(), p)
+      const res = await fetchAuthLogin(apiBase, u.trim(), p)
       if (res.token) onLoggedIn(res.token)
       else setErr(res.error || 'התחברות נכשלה')
     } catch {
-      setErr('שגיאת רשת – בדוק שרת ו-HTTPS')
+      setErr('אין חיבור לשרת. בדוק אינטרנט ו-HTTPS.')
     } finally {
       setLoading(false)
     }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import App from './App.tsx'
+import { fetchAuthLogin } from './api/authLogin'
 import {
   getResolvedApiBase,
   loadBundledApiConfig,
@@ -47,16 +48,7 @@ async function fetchToken(
   username: string,
   password: string,
 ): Promise<{ token?: string; error?: string }> {
-  const r = await fetch(`${base.replace(/\/+$/, '')}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-  const body = (await r.json()) as { token?: string; error?: string }
-  if (!r.ok || !body.token) {
-    return { error: body.error || 'התחברות נכשלה' }
-  }
-  return { token: body.token }
+  return fetchAuthLogin(base, username, password)
 }
 
 export default function Root() {
@@ -115,7 +107,7 @@ export default function Root() {
           if (!cancelled) {
             setStoredToken(null)
             setToken(null)
-            setEnvLoginError('שגיאת רשת – בדוק שרת ו-HTTPS')
+            setEnvLoginError('אין חיבור לשרת. בדוק אינטרנט, VPN, ו-HTTPS.')
           }
         }
         setAuthReady(true)
