@@ -1904,8 +1904,12 @@ tr:last-child td {
 
 .login-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   padding: 28px 24px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
 }
 
 .login-title {
@@ -1937,4 +1941,17 @@ tr:last-child td {
   margin: -4px 0 4px;
   font-size: 0.78rem;
   line-height: 1.45;
+  word-break: break-all;
+}
+
+/* מסך ראשי: אזהרה כשאין סנכרון לשרת (רק localStorage) */
+.local-only-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(251, 146, 60, 0.15);
+  border: 1px solid rgba(251, 146, 60, 0.45);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.4;
 }

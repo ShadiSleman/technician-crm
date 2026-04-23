@@ -5,6 +5,7 @@ import {
   loadBundledApiConfig,
 } from './api/apiBase'
 import { BootSplash } from './components/BootSplash.tsx'
+import { LoginScreen } from './components/LoginScreen.tsx'
 
 const TOKEN_KEY = 'hvac-crm-jwt'
 
@@ -63,6 +64,9 @@ export default function Root() {
   const [api, setApi] = useState('')
   const [authReady, setAuthReady] = useState(false)
   const [token, setToken] = useState<string | null>(() => getStoredToken())
+  const [envLoginError, setEnvLoginError] = useState<string | undefined>(
+    undefined,
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -85,6 +89,7 @@ export default function Root() {
     if (!base) {
       setStoredToken(null)
       setToken(null)
+      setEnvLoginError(undefined)
       setAuthReady(true)
       return
     }
@@ -100,19 +105,23 @@ export default function Root() {
           if (res.token) {
             setStoredToken(res.token)
             setToken(res.token)
+            setEnvLoginError(undefined)
           } else {
             setStoredToken(null)
             setToken(null)
+            setEnvLoginError(res.error)
           }
         } catch {
           if (!cancelled) {
             setStoredToken(null)
             setToken(null)
+            setEnvLoginError('שגיאת רשת – בדוק שרת ו-HTTPS')
           }
         }
         setAuthReady(true)
         return
       }
+      setEnvLoginError(undefined)
 
       const existing = getStoredToken()
       if (existing) {
@@ -139,8 +148,22 @@ export default function Root() {
     return <BootSplash />
   }
 
-  const activeApi = getResolvedApiBase() || api
+  const activeApi = (getResolvedApiBase() || api).trim()
   const isRemote = Boolean(activeApi && token)
+
+  if (activeApi && !token) {
+    return (
+      <LoginScreen
+        apiBase={activeApi}
+        initialError={envLoginError}
+        onLoggedIn={(t) => {
+          setStoredToken(t)
+          setToken(t)
+          setEnvLoginError(undefined)
+        }}
+      />
+    )
+  }
 
   if (isRemote) {
     return (

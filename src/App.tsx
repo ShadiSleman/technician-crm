@@ -957,6 +957,15 @@ export default function App({
         </nav>
       </header>
 
+      {!isRemote && (
+        <div className="local-only-banner" role="status">
+          <strong>מצב מקומי.</strong> אין שרת או שאתה לא מחובר — הלקוחות נשמרים
+          רק במכשיר (localStorage) ולא יופיעו ב-Mongo. הגדר
+          <code> VITE_API_URL </code> והתחבר, או השתמש ב־<code>app-config.json</code>
+          + התחברות.
+        </div>
+      )}
+
       {tab === 'dashboard' && (
         <main>
           <h2 className="section-title">סיכום מהיר</h2>
