@@ -253,12 +253,12 @@ export default function App({
     const same =
       pl.length === data.priceList.length &&
       pl.every((p, i) => p.id === data.priceList[i]?.id)
+    const toSave: AppData = same ? data : { ...data, priceList: pl }
     if (!same) {
       setData((d) => ({ ...d, priceList: pl }))
-      return
     }
     if (!isRemote || remoteHydrated.current) {
-      saveAppData(data)
+      saveAppData(toSave)
     }
     if (
       isRemote &&
@@ -268,6 +268,7 @@ export default function App({
       onRemoteLogout
     ) {
       if (remoteSaveTimer.current) clearTimeout(remoteSaveTimer.current)
+      const payload = toSave
       remoteSaveTimer.current = setTimeout(() => {
         void (async () => {
           try {
@@ -277,7 +278,7 @@ export default function App({
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${remoteToken}`,
               },
-              body: JSON.stringify({ data }),
+              body: JSON.stringify({ data: payload }),
             })
             if (r.status === 401) onRemoteLogout()
             else if (!r.ok) {
