@@ -58,6 +58,7 @@ export function refreshQuoteFromPriceList(
       ...l,
       description: item.name,
       unitPriceInclVat: item.unitPriceInclVat,
+      useCustomUnitPrice: false,
     }
   })
   const now = new Date().toISOString()

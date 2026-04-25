@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatHebYmd } from '../dates'
 import {
   formatIls,
@@ -28,16 +28,22 @@ type Props = {
   /** מכרטיס לקוח: לבחור לקוח בעורך הצעה חדשה */
   quotesCustomerFocus?: QuotesCustomerFocus | null
   onQuotesCustomerFocusApplied?: () => void
-  /** אחרי שינויים ב-Mongo / מכשיר אחר: רענון מלא מ-workspace */
+  /** אחרי שינויים ב-Mongo / מכשיר אחר: רענון מלא מ-workspace; מחזיר את הנתונים המרוחקים אחרי כן */
   isRemote?: boolean
-  onRefreshFromServer?: () => void | Promise<void>
+  onRefreshFromServer?: () => void | Promise<AppData | null | void>
 }
 
-/** שורה בעורך — רק מזהה ממחירון וכמות (תיאור/מחיר נמשכים מהמחירון בשמירה) */
+const QUOTE_UNIT_PRICE_EPS = 1e-6
+
+/** שורה בעורך: פריט+כמות; מחיר — ברירת מחדל מהמחירון או עריכה לשורה (נשמר בלשורה) */
 type CatalogQuoteRow = {
   rowKey: string
   priceListItemId: string | null
   qty: number
+  /** null = מחיר לפי המחירון; מספר = ערך שנשלח בהצעה (כולל התאמות) */
+  unitPriceInclVat: number | null
+  /** פריט שבהצעה אבל אינו (עוד) במחירון */
+  staleLineDescription?: string
 }
 
 function emptyRow(): CatalogQuoteRow {
@@ -45,6 +51,7 @@ function emptyRow(): CatalogQuoteRow {
     rowKey: crypto.randomUUID(),
     priceListItemId: null,
     qty: 1,
+    unitPriceInclVat: null,
   }
 }
 
@@ -58,13 +65,117 @@ function ensureTrailingEmptyRow(rows: CatalogQuoteRow[]): CatalogQuoteRow[] {
   return rows
 }
 
+function effectiveRowUnitInEditor(
+  row: CatalogQuoteRow,
+  item: PriceListItem | null,
+): number {
+  if (row.staleLineDescription) {
+    if (row.unitPriceInclVat === null) return 0
+    return row.unitPriceInclVat
+  }
+  if (!item) return 0
+  if (row.unitPriceInclVat === null) return item.unitPriceInclVat
+  return row.unitPriceInclVat
+}
+
+function rowSavesWithCustomUnitPrice(
+  row: CatalogQuoteRow,
+  item: PriceListItem | null,
+): boolean {
+  if (row.staleLineDescription) return true
+  if (!item) return false
+  if (row.unitPriceInclVat === null) return false
+  return (
+    Math.abs(row.unitPriceInclVat - item.unitPriceInclVat) > QUOTE_UNIT_PRICE_EPS
+  )
+}
+
+function lineToEditorRow(
+  l: QuoteLine,
+  pl: PriceListItem[],
+): CatalogQuoteRow {
+  const item = l.priceListItemId
+    ? pl.find((p) => p.id === l.priceListItemId)
+    : undefined
+  if (l.priceListItemId && !item) {
+    return {
+      rowKey: crypto.randomUUID(),
+      priceListItemId: l.priceListItemId,
+      qty: Math.max(1, l.qty),
+      unitPriceInclVat: l.unitPriceInclVat,
+      staleLineDescription: l.description,
+    }
+  }
+  if (!l.priceListItemId) {
+    return {
+      rowKey: crypto.randomUUID(),
+      priceListItemId: null,
+      qty: Math.max(1, l.qty),
+      unitPriceInclVat: l.unitPriceInclVat,
+    }
+  }
+  const u =
+    l.useCustomUnitPrice ||
+    Math.abs(l.unitPriceInclVat - item!.unitPriceInclVat) > QUOTE_UNIT_PRICE_EPS
+      ? l.unitPriceInclVat
+      : null
+  return {
+    rowKey: crypto.randomUUID(),
+    priceListItemId: l.priceListItemId,
+    qty: Math.max(1, l.qty),
+    unitPriceInclVat: u,
+  }
+}
+
+function quoteToEditorRows(
+  q: Quote,
+  priceList: PriceListItem[],
+): CatalogQuoteRow[] {
+  const raw = Array.isArray(q.lines) ? q.lines : []
+  if (raw.length === 0) return ensureTrailingEmptyRow([emptyRow()])
+  return ensureTrailingEmptyRow(
+    raw.map((l) => lineToEditorRow(l, priceList)),
+  )
+}
+
 function linePriceStale(l: QuoteLine, priceList: PriceListItem[]): boolean {
   if (!l.priceListItemId) return false
   const p = priceList.find((x) => x.id === l.priceListItemId)
   if (!p) return true
-  return (
-    p.unitPriceInclVat !== l.unitPriceInclVat || (p.name || '') !== l.description
-  )
+  if ((p.name || '') !== l.description) return true
+  if (l.useCustomUnitPrice) return false
+  return p.unitPriceInclVat !== l.unitPriceInclVat
+}
+
+function buildLinesForSave(
+  rows: CatalogQuoteRow[],
+  priceList: PriceListItem[],
+): QuoteLine[] {
+  const lines: QuoteLine[] = []
+  for (const r of rows) {
+    if (r.staleLineDescription && r.priceListItemId) {
+      if (r.qty <= 0) continue
+      lines.push({
+        priceListItemId: r.priceListItemId,
+        description: r.staleLineDescription,
+        qty: r.qty,
+        unitPriceInclVat: r.unitPriceInclVat ?? 0,
+        useCustomUnitPrice: true,
+      })
+      continue
+    }
+    const item = priceList.find((p) => p.id === r.priceListItemId)
+    if (!item || r.qty <= 0) continue
+    const unit = effectiveRowUnitInEditor(r, item)
+    lines.push({
+      priceListItemId: item.id,
+      description: item.name,
+      qty: r.qty,
+      unitPriceInclVat: unit,
+      useCustomUnitPrice: rowSavesWithCustomUnitPrice(r, item),
+    })
+  }
+  return lines
 }
 
 export function QuotesPage({
@@ -75,11 +186,17 @@ export function QuotesPage({
   isRemote,
   onRefreshFromServer,
 }: Props) {
-  const [quoteCustomerId, setQuoteCustomerId] = useState('')
-  const [quoteRows, setQuoteRows] = useState<CatalogQuoteRow[]>(() =>
+  const [newQuoteCustomerId, setNewQuoteCustomerId] = useState('')
+  const [newQuoteRows, setNewQuoteRows] = useState<CatalogQuoteRow[]>(() =>
     ensureTrailingEmptyRow([emptyRow()]),
   )
-  const [quoteNotes, setQuoteNotes] = useState('')
+  const [newQuoteNotes, setNewQuoteNotes] = useState('')
+  const [editQuoteId, setEditQuoteId] = useState<string | null>(null)
+  const [editRows, setEditRows] = useState<CatalogQuoteRow[]>(() =>
+    ensureTrailingEmptyRow([emptyRow()]),
+  )
+  const [editCustomerId, setEditCustomerId] = useState('')
+  const [editNotes, setEditNotes] = useState('')
   const [printBuffer, setPrintBuffer] = useState<Quote | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -100,83 +217,125 @@ export function QuotesPage({
 
   useEffect(() => {
     if (!quotesCustomerFocus) return
-    setQuoteCustomerId(quotesCustomerFocus.customerId)
+    setNewQuoteCustomerId(quotesCustomerFocus.customerId)
     onQuotesCustomerFocusApplied?.()
   }, [quotesCustomerFocus?.nonce, quotesCustomerFocus?.customerId])
 
-  /** לחישוב סה״כ בתצוגה */
-  const quoteLinesPreview: QuoteLine[] = useMemo(() => {
-    const out: QuoteLine[] = []
-    for (const r of quoteRows) {
-      if (!r.priceListItemId) continue
-      const item = data.priceList.find((p) => p.id === r.priceListItemId)
-      if (!item) continue
-      out.push({
-        priceListItemId: item.id,
-        description: item.name,
-        qty: r.qty,
-        unitPriceInclVat: item.unitPriceInclVat,
-      })
-    }
-    return out
-  }, [quoteRows, data.priceList])
+  const newQuoteLinesPreview: QuoteLine[] = useMemo(
+    () => buildLinesForSave(newQuoteRows, data.priceList),
+    [newQuoteRows, data.priceList],
+  )
 
-  const draftAsQuote: Quote | null = useMemo(() => {
-    if (quoteLinesPreview.length === 0) return null
-    const c = data.customers.find((x) => x.id === quoteCustomerId)
+  const newDraftAsQuote: Quote | null = useMemo(() => {
+    if (newQuoteLinesPreview.length === 0) return null
+    const c = data.customers.find((x) => x.id === newQuoteCustomerId)
     const now = new Date().toISOString()
     return {
       id: 'draft',
-      customerId: quoteCustomerId || null,
+      customerId: newQuoteCustomerId || null,
       customerNameSnapshot: c?.name ?? '',
       customerPhoneSnapshot: c?.phone ?? '',
-      lines: quoteLinesPreview,
-      totalInclVat: linesTotal(quoteLinesPreview),
-      notes: quoteNotes.trim(),
+      lines: newQuoteLinesPreview,
+      totalInclVat: linesTotal(newQuoteLinesPreview),
+      notes: newQuoteNotes.trim(),
       createdAt: now,
       updatedAt: now,
     }
-  }, [quoteLinesPreview, quoteCustomerId, data.customers, quoteNotes])
+  }, [newQuoteLinesPreview, newQuoteCustomerId, newQuoteNotes, data.customers])
+
+  const editQuoteLinesPreview: QuoteLine[] = useMemo(
+    () => buildLinesForSave(editRows, data.priceList),
+    [editRows, data.priceList],
+  )
+
+  const cancelEdit = useCallback(() => {
+    setEditQuoteId(null)
+    setEditCustomerId('')
+    setEditNotes('')
+    setEditRows(ensureTrailingEmptyRow([emptyRow()]))
+  }, [])
+
+  useEffect(() => {
+    if (!editQuoteId) return
+    window.scrollTo(0, 0)
+  }, [editQuoteId])
+
+  useEffect(() => {
+    if (!editQuoteId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        cancelEdit()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editQuoteId, cancelEdit])
 
   async function handleRefreshFromServer() {
     if (!onRefreshFromServer) return
     setRefreshing(true)
     try {
-      await onRefreshFromServer()
+      const fresh = await onRefreshFromServer()
+      if (fresh && Array.isArray(fresh.priceList)) {
+        setNewQuoteRows((rows) =>
+          rows.map((r) =>
+            r.priceListItemId
+              ? { ...r, unitPriceInclVat: null }
+              : r,
+          ),
+        )
+      }
     } finally {
       setRefreshing(false)
     }
   }
 
-  function applyCatalogPricesToQuote(quoteId: string) {
-    setData((d) => ({
-      ...d,
-      quotes: d.quotes.map((q) =>
-        q.id === quoteId
-          ? refreshQuoteFromPriceList(q, d.priceList)
-          : q,
-      ),
-    }))
+  function applyCatalogToEditingQuote() {
+    if (!editQuoteId) return
+    setData((d) => {
+      const current = d.quotes.find((x) => x.id === editQuoteId)
+      if (!current) return d
+      const pl = d.priceList
+      const next = refreshQuoteFromPriceList(current, pl)
+      queueMicrotask(() => {
+        setEditRows(quoteToEditorRows(next, pl))
+      })
+      return {
+        ...d,
+        quotes: d.quotes.map((q) =>
+          q.id === editQuoteId ? next : q,
+        ),
+      }
+    })
   }
 
-  function saveQuote() {
-    if (!quoteCustomerId) {
+  function beginEditQuote(q: Quote) {
+    if (!q.id) {
+      alert('אין מזהה להצעה — לא ניתן לערוך')
+      return
+    }
+    if (editQuoteId === q.id) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    try {
+      setEditQuoteId(q.id)
+      setEditCustomerId(q.customerId || '')
+      setEditNotes(q.notes ?? '')
+      setEditRows(quoteToEditorRows(q, data.priceList))
+    } catch (e) {
+      console.error(e)
+      alert('שגיאה בטעינת ההצעה לעריכה')
+    }
+  }
+
+  function saveNewQuote() {
+    if (!newQuoteCustomerId) {
       alert('נא לבחור לקוח — ההצעה נשמרת משויכת ללקוח.')
       return
     }
-
-    const lines: QuoteLine[] = []
-    for (const r of quoteRows) {
-      const item = data.priceList.find((p) => p.id === r.priceListItemId)
-      if (!item || r.qty <= 0) continue
-      lines.push({
-        priceListItemId: item.id,
-        description: item.name,
-        qty: r.qty,
-        unitPriceInclVat: item.unitPriceInclVat,
-      })
-    }
-
+    const lines = buildLinesForSave(newQuoteRows, data.priceList)
     if (lines.length === 0) {
       if (data.priceList.length === 0) {
         alert('אין פריטים במחירון — הוסיפו פריטים בלשונית «מחירון» ואז חזרו לכאן.')
@@ -185,39 +344,81 @@ export function QuotesPage({
       }
       return
     }
-
     const c: Customer | undefined = data.customers.find(
-      (x) => x.id === quoteCustomerId,
+      (x) => x.id === newQuoteCustomerId,
     )
     const now = new Date().toISOString()
     const q: Quote = {
       id: crypto.randomUUID(),
-      customerId: quoteCustomerId,
+      customerId: newQuoteCustomerId,
       customerNameSnapshot: c?.name ?? '',
       customerPhoneSnapshot: c?.phone ?? '',
       lines,
       totalInclVat: linesTotal(lines),
-      notes: quoteNotes.trim(),
+      notes: newQuoteNotes.trim(),
       createdAt: now,
       updatedAt: now,
     }
     setData((d) => ({ ...d, quotes: [q, ...d.quotes] }))
-    setQuoteRows(ensureTrailingEmptyRow([emptyRow()]))
-    setQuoteNotes('')
+    setNewQuoteRows(ensureTrailingEmptyRow([emptyRow()]))
+    setNewQuoteNotes('')
     alert('ההצעה נשמרה')
+  }
+
+  function saveEditQuote() {
+    if (!editQuoteId) return
+    if (!editCustomerId) {
+      alert('נא לבחור לקוח — ההצעה נשמרת משויכת ללקוח.')
+      return
+    }
+    const lines = buildLinesForSave(editRows, data.priceList)
+    if (lines.length === 0) {
+      if (data.priceList.length === 0) {
+        alert('אין פריטים במחירון — הוסיפו פריטים בלשונית «מחירון» ואז חזרו לכאן.')
+      } else {
+        alert('נא לבחור לפחות פריט אחד מהמחירון.')
+      }
+      return
+    }
+    const c: Customer | undefined = data.customers.find(
+      (x) => x.id === editCustomerId,
+    )
+    const now = new Date().toISOString()
+    setData((d) => ({
+      ...d,
+      quotes: d.quotes.map((q) =>
+        q.id === editQuoteId
+          ? {
+              ...q,
+              customerId: editCustomerId,
+              customerNameSnapshot: c?.name ?? '',
+              customerPhoneSnapshot: c?.phone ?? '',
+              lines,
+              totalInclVat: linesTotal(lines),
+              notes: editNotes.trim(),
+              updatedAt: now,
+            }
+          : q,
+      ),
+    }))
+    cancelEdit()
+    alert('ההצעה עודכנה')
   }
 
   function deleteQuote(id: string) {
     if (!confirm('למחוק הצעת מחיר זו?')) return
+    if (editQuoteId === id) cancelEdit()
     setData((d) => ({ ...d, quotes: d.quotes.filter((q) => q.id !== id) }))
   }
 
-  function openPrintForQuote(q: Quote) {
+  async function openPrintForQuote(q: Quote) {
     setPrintBuffer(q)
-    setTimeout(() => {
+    await waitAnimationFrames(3)
+    try {
       window.print()
-      setTimeout(() => setPrintBuffer(null), 400)
-    }, 200)
+    } finally {
+      setTimeout(() => setPrintBuffer(null), 500)
+    }
   }
 
   async function shareAsPdf(q: Quote) {
@@ -251,14 +452,262 @@ export function QuotesPage({
     }
   }
 
+  const renderQuoteRowsTable = (
+    rows: CatalogQuoteRow[],
+    setRows: Dispatch<SetStateAction<CatalogQuoteRow[]>>,
+  ) => (
+    <div className="table-wrap quote-editor-lines-wrap">
+      <table className="quote-editor-lines-table">
+        <thead>
+          <tr>
+            <th>פריט</th>
+            <th>כמות</th>
+            <th>מחיר יחידה ₪</th>
+            <th>מחיר ₪ (כמות×יחידה)</th>
+            <th aria-label="הסר שורה" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const item = row.priceListItemId
+              ? (data.priceList.find((p) => p.id === row.priceListItemId) ??
+                null)
+              : null
+            const lineForSum: QuoteLine | null = row.staleLineDescription
+              ? {
+                  priceListItemId: row.priceListItemId,
+                  description: row.staleLineDescription,
+                  qty: row.qty,
+                  unitPriceInclVat: effectiveRowUnitInEditor(row, null),
+                }
+              : item
+                ? {
+                    priceListItemId: item.id,
+                    description: item.name,
+                    qty: row.qty,
+                    unitPriceInclVat: effectiveRowUnitInEditor(row, item),
+                  }
+                : null
+
+            return (
+              <tr key={row.rowKey}>
+                <td>
+                  <select
+                    className="table-inline-input quote-editor-select"
+                    value={row.priceListItemId ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setRows((rws) => {
+                        const next = rws.map((r, j) =>
+                          j === i
+                            ? {
+                                ...r,
+                                priceListItemId: v || null,
+                                unitPriceInclVat: null,
+                                staleLineDescription: undefined,
+                              }
+                            : r,
+                        )
+                        const isLast = i === rws.length - 1
+                        if (v && isLast) {
+                          return ensureTrailingEmptyRow(next)
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    <option value="">— בחרו פריט —</option>
+                    {row.staleLineDescription && row.priceListItemId ? (
+                      <option value={row.priceListItemId}>
+                        {row.staleLineDescription} (הוסר מהמחירון — בחרו אחר)
+                      </option>
+                    ) : null}
+                    {priceListSorted.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name || '(ללא שם)'}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className="table-inline-input quote-editor-qty"
+                    inputMode="numeric"
+                    value={row.qty}
+                    disabled={!row.priceListItemId}
+                    onChange={(e) =>
+                      setRows((rws) =>
+                        rws.map((r, j) =>
+                          j === i
+                            ? {
+                                ...r,
+                                qty: Math.max(1, Number(e.target.value) || 1),
+                              }
+                            : r,
+                        ),
+                      )
+                    }
+                  />
+                </td>
+                <td dir="ltr" className="quote-editor-num">
+                  {item || row.staleLineDescription ? (
+                    <input
+                      className="table-inline-input quote-editor-unit"
+                      inputMode="decimal"
+                      style={{ textAlign: 'left' }}
+                      value={String(
+                        effectiveRowUnitInEditor(row, item),
+                      )}
+                      onChange={(e) => {
+                        const n =
+                          Number(
+                            e.target.value.replace(',', '.'),
+                          ) || 0
+                        setRows((rws) =>
+                          rws.map((r, j) =>
+                            j === i
+                              ? { ...r, unitPriceInclVat: n }
+                              : r,
+                          ),
+                        )
+                      }}
+                    />
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+                <td
+                  dir="ltr"
+                  className="quote-editor-num quote-editor-line-total"
+                >
+                  {lineForSum ? (
+                    <>₪{formatIls(lineSum(lineForSum))}</>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn btn-ghost quote-editor-remove"
+                    onClick={() =>
+                      setRows((rws) => {
+                        const next = rws.filter((_, j) => j !== i)
+                        return ensureTrailingEmptyRow(
+                          next.length === 0 ? [emptyRow()] : next,
+                        )
+                      })
+                    }
+                  >
+                    הסר
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+
+  const editingQuote = editQuoteId
+    ? data.quotes.find((q) => q.id === editQuoteId)
+    : undefined
+
   return (
-    <>
+    <div className="quotes-page">
+      {editQuoteId ? (
+        <main className="quote-edit-full">
+          <div className="quote-edit-full-bar">
+            <button
+              type="button"
+              className="btn quote-edit-back"
+              onClick={cancelEdit}
+            >
+              ← חזרה
+            </button>
+            <h2 className="section-title quote-edit-full-title">
+              עריכת הצעה
+              {editingQuote ? (
+                <span className="quote-edit-full-sub">
+                  · {editingQuote.customerNameSnapshot || 'ללא שם'} ·{' '}
+                  {formatHebYmd(editingQuote.createdAt.slice(0, 10))}
+                </span>
+              ) : null}
+            </h2>
+          </div>
+          <p className="muted section-subcount">
+            <strong>חזרה</strong> — יוצאים בלי לשמור.{' '}
+            <strong>שמור שינויים</strong> — לעדכן את הרשומה.{' '}
+            <strong>עדכן ממחירון</strong> — מיישר מחירים לפי המחירון. Esc לסגור.
+          </p>
+          <div className="toolbar" style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={applyCatalogToEditingQuote}
+            >
+              עדכן מחירים מהמחירון
+            </button>
+          </div>
+          <div className="form-grid two">
+            <div>
+              <label className="field">לקוח (חובה לשמירה)</label>
+              <select
+                value={editCustomerId}
+                onChange={(e) => setEditCustomerId(e.target.value)}
+              >
+                <option value="">— בחרו לקוח —</option>
+                {customersSorted.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {c.phone}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {data.priceList.length === 0 ? (
+            <p className="muted" style={{ marginBottom: 8 }}>
+              אין פריטים במחירון — הוסיפו בלשונית <strong>מחירון</strong>.
+            </p>
+          ) : null}
+          {renderQuoteRowsTable(editRows, setEditRows)}
+          <div style={{ marginTop: 12 }}>
+            <label className="field">הערות להצעה</label>
+            <input
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              placeholder="תוקף, תנאי תשלום..."
+            />
+          </div>
+          <p className="quote-total-banner">
+            <span className="quote-total-main">
+              סה״כ:{' '}
+              <strong>₪{formatIls(linesTotal(editQuoteLinesPreview))}</strong>
+            </span>
+            <span className="muted quote-total-vat-note">
+              {' '}
+              (מחירים כוללים מע״מ 18%)
+            </span>
+          </p>
+          <div
+            className="toolbar"
+            style={{ marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}
+          >
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={saveEditQuote}
+            >
+              שמור שינויים
+            </button>
+          </div>
+        </main>
+      ) : (
       <main>
         <p className="muted section-subcount" style={{ marginTop: 0 }}>
-          <strong>ההצעות</strong> נשמרות <strong>בחשבון שלך</strong> (ענן) בכל מכשיר
-          שבו אותו משתמש מחובר. המחירים בטבלאות נלקחים מהמחירון בעת העריכה; בהצעה
-          <strong> שמורה</strong> נשמרים מחירי רגע השמירה — לעדכן אחרי שינוי
-          מחירון, לחצו <strong>«עדכן מחירים מהמחירון»</strong> בכרטיס.
+          <strong>רענן</strong> מעדכן מהענן ומיישר <strong>טיוטה חדשה</strong>{' '}
+          למחירון. <strong>עריכה</strong> — מסך נפרד אחרי «ערוך» בכרטיס.
         </p>
         {isRemote && onRefreshFromServer ? (
           <div className="toolbar" style={{ marginBottom: 12 }}>
@@ -268,26 +717,27 @@ export function QuotesPage({
               onClick={() => void handleRefreshFromServer()}
               disabled={refreshing}
             >
-              {refreshing ? 'טוען מהענן…' : 'רענן נתונים מהענן'}
+              {refreshing ? 'טוען…' : 'רענן ממחירון (ענן)'}
             </button>
             <span className="muted" style={{ fontSize: '0.9rem' }}>
-              אם ערכת ב-Mongo או במכשיר אחר, רענון ימשוך את הגרסה האחרונה.
+              אחרי שינוי מחירון ממקום אחר — רענון כאן, והטיוטה תשקף מחירים
+              מעודכנים.
             </span>
           </div>
         ) : null}
 
-        <h2 className="section-title">הצעת מחיר חדשה</h2>
+        <h2 className="section-title">הצעת מחיר חדשה (טיוטה)</h2>
         <p className="muted section-subcount">
-          <strong>לקוח חובה</strong> לשמירה. הוסיפו שורות מהמחירון, ואז{' '}
-          <strong>שמור הצעת מחיר</strong> — השמירה מסתנכרנת אוטומטית לענן.
-          (מחירי יחידה משתנים בזמן אמת לפי לשונית <strong>מחירון</strong>.)
+          <strong>לקוח</strong> (חובה) · פריט · מחיר לשורה לפי מחירון או ידני.{' '}
+          <strong>שמור</strong> מוסיף לרשימה למטה. <strong>עריכה</strong> — דרך
+          «ערוך» בכרטיס (מסך נפרד).
         </p>
         <div className="form-grid two">
           <div>
             <label className="field">לקוח (חובה לשמירה)</label>
             <select
-              value={quoteCustomerId}
-              onChange={(e) => setQuoteCustomerId(e.target.value)}
+              value={newQuoteCustomerId}
+              onChange={(e) => setNewQuoteCustomerId(e.target.value)}
             >
               <option value="">— בחרו לקוח —</option>
               {customersSorted.map((c) => (
@@ -304,128 +754,12 @@ export function QuotesPage({
             אין פריטים במחירון — הוסיפו בלשונית <strong>מחירון</strong>.
           </p>
         ) : null}
-        <div className="table-wrap quote-editor-lines-wrap">
-          <table className="quote-editor-lines-table">
-            <thead>
-              <tr>
-                <th>פריט</th>
-                <th>כמות</th>
-                <th>מחיר יחידה ₪</th>
-                <th>מחיר ₪ (כמות×יחידה)</th>
-                <th aria-label="הסר שורה" />
-              </tr>
-            </thead>
-            <tbody>
-              {quoteRows.map((row, i) => {
-                const item = row.priceListItemId
-                  ? data.priceList.find((p) => p.id === row.priceListItemId)
-                  : null
-                const lineForSum: QuoteLine | null = item
-                  ? {
-                      priceListItemId: item.id,
-                      description: item.name,
-                      qty: row.qty,
-                      unitPriceInclVat: item.unitPriceInclVat,
-                    }
-                  : null
-
-                return (
-                  <tr key={row.rowKey}>
-                    <td>
-                      <select
-                        className="table-inline-input quote-editor-select"
-                        value={row.priceListItemId ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          setQuoteRows((rows) => {
-                            const next = rows.map((r, j) =>
-                              j === i
-                                ? {
-                                    ...r,
-                                    priceListItemId: v || null,
-                                  }
-                                : r,
-                            )
-                            const isLast = i === rows.length - 1
-                            if (v && isLast) {
-                              return ensureTrailingEmptyRow(next)
-                            }
-                            return next
-                          })
-                        }}
-                      >
-                        <option value="">— בחרו פריט —</option>
-                        {priceListSorted.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name || '(ללא שם)'}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        className="table-inline-input quote-editor-qty"
-                        inputMode="numeric"
-                        value={row.qty}
-                        disabled={!row.priceListItemId}
-                        onChange={(e) =>
-                          setQuoteRows((rows) =>
-                            rows.map((r, j) =>
-                              j === i
-                                ? {
-                                    ...r,
-                                    qty: Math.max(
-                                      1,
-                                      Number(e.target.value) || 1,
-                                    ),
-                                  }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </td>
-                    <td dir="ltr" className="quote-editor-num">
-                      {item ? (
-                        <>₪{formatIls(item.unitPriceInclVat)}</>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td dir="ltr" className="quote-editor-num quote-editor-line-total">
-                      {lineForSum ? (
-                        <>₪{formatIls(lineSum(lineForSum))}</>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-ghost quote-editor-remove"
-                        onClick={() =>
-                          setQuoteRows((rows) => {
-                            const next = rows.filter((_, j) => j !== i)
-                            return ensureTrailingEmptyRow(
-                              next.length === 0 ? [emptyRow()] : next,
-                            )
-                          })
-                        }
-                      >
-                        הסר
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {renderQuoteRowsTable(newQuoteRows, setNewQuoteRows)}
         <div style={{ marginTop: 12 }}>
           <label className="field">הערות להצעה</label>
           <input
-            value={quoteNotes}
-            onChange={(e) => setQuoteNotes(e.target.value)}
+            value={newQuoteNotes}
+            onChange={(e) => setNewQuoteNotes(e.target.value)}
             placeholder="תוקף, תנאי תשלום..."
           />
         </div>
@@ -433,7 +767,7 @@ export function QuotesPage({
         <p className="quote-total-banner">
           <span className="quote-total-main">
             סה״כ:{' '}
-            <strong>₪{formatIls(linesTotal(quoteLinesPreview))}</strong>
+            <strong>₪{formatIls(linesTotal(newQuoteLinesPreview))}</strong>
           </span>
           <span className="muted quote-total-vat-note">
             {' '}
@@ -447,23 +781,23 @@ export function QuotesPage({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={saveQuote}
+            onClick={saveNewQuote}
           >
             שמור הצעת מחיר
           </button>
           <button
             type="button"
             className="btn"
-            disabled={!draftAsQuote}
-            onClick={() => draftAsQuote && openPrintForQuote(draftAsQuote)}
+            disabled={!newDraftAsQuote}
+            onClick={() => newDraftAsQuote && openPrintForQuote(newDraftAsQuote)}
           >
             הדפס (טיוטה)
           </button>
           <button
             type="button"
             className="btn"
-            disabled={!draftAsQuote || pdfBusy}
-            onClick={() => draftAsQuote && void shareAsPdf(draftAsQuote)}
+            disabled={!newDraftAsQuote || pdfBusy}
+            onClick={() => newDraftAsQuote && void shareAsPdf(newDraftAsQuote)}
           >
             {pdfBusy ? 'מכין…' : 'שתף PDF (טיוטה)'}
           </button>
@@ -498,21 +832,21 @@ export function QuotesPage({
                 {q.notes ? <p className="meta">{q.notes}</p> : null}
                 {q.lines.some((l) => linePriceStale(l, data.priceList)) ? (
                   <p className="meta" style={{ color: 'var(--pri-high, #f59e0b)' }}>
-                    מחיר או שם בלשונית «מחירון» השתנו — ליישר את ההצעה הישנה לחצו
-                    &quot;עדכן מחירים מהמחירון&quot;.
+                    שם/מחיר במחירון כבר לא תואמים — פתחו <strong>ערוך</strong>{' '}
+                    ויישרו שם.
                   </p>
                 ) : null}
                 <div className="actions">
                   <button
                     type="button"
-                    className="btn"
-                    onClick={() => applyCatalogPricesToQuote(q.id)}
+                    className="btn btn-primary"
+                    onClick={() => beginEditQuote(q)}
                   >
-                    עדכן מחירים מהמחירון
+                    {editQuoteId === q.id ? 'המשך בעריכה' : 'ערוך'}
                   </button>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn"
                     disabled={pdfBusy}
                     onClick={() => void shareAsPdf(q)}
                   >
@@ -522,7 +856,7 @@ export function QuotesPage({
                     type="button"
                     className="btn"
                     disabled={pdfBusy}
-                    onClick={() => openPrintForQuote(q)}
+                    onClick={() => void openPrintForQuote(q)}
                   >
                     הדפס
                   </button>
@@ -540,9 +874,10 @@ export function QuotesPage({
           )}
         </div>
       </main>
+      )}
 
       {printBuffer ? (
-        <div className="print-quote-portal" aria-hidden>
+        <div className="print-quote-portal">
           <div
             className="quote-print-sheet quote-print-sheet--solo quote-pdf-capture-root"
             data-quote-pdf-capture="quote-print"
@@ -625,6 +960,6 @@ export function QuotesPage({
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

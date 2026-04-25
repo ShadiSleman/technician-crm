@@ -291,25 +291,35 @@ body {
 
 .tabs {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   margin-top: 12px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface2) 88%, #e8f0e8 12%);
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--border) 45%, #bcd4c0 20%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent);
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  background: color-mix(in srgb, #fff 92%, var(--surface) 8%);
   color: var(--text);
-  padding: 9px 14px;
-  border-radius: 999px;
+  padding: 10px 15px;
+  border-radius: 14px;
   font-family: inherit;
-  font-size: 0.88rem;
-  font-weight: 600;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  transition:
+    background 0.18s,
+    color 0.15s,
+    box-shadow 0.18s,
+    border-color 0.15s;
 }
 
 .tab-icon {
@@ -317,24 +327,35 @@ body {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  opacity: 0.92;
+  opacity: 0.78;
+  color: color-mix(in srgb, var(--text) 75%, #2d5a3d 25%);
+  transition: opacity 0.15s, color 0.15s;
 }
 
+.tab:hover .tab-icon,
 .tab.active .tab-icon {
   opacity: 1;
+  color: inherit;
 }
 
 .tab:hover {
-  transform: translateY(-1px);
-  border-color: var(--accent);
-  box-shadow: var(--glow);
+  transform: none;
+  background: #fff;
+  border-color: color-mix(in srgb, #7eb89a 45%, var(--border));
+  box-shadow: 0 2px 10px color-mix(in srgb, #1a3d2a 8%, transparent);
 }
 
 .tab.active {
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff;
-  border-color: transparent;
-  box-shadow: var(--glow);
+  background: linear-gradient(
+    150deg,
+    #d1f0e0 0%,
+    #c8e8f0 50%,
+    #d4e0fa 100%
+  );
+  color: #14302a;
+  font-weight: 700;
+  border-color: color-mix(in srgb, #3d8b6a 32%, #5a7eb8 22%);
+  box-shadow: 0 2px 12px color-mix(in srgb, #0d3d2a 12%, #0d1f3d 8%);
 }
 
 .section-title {
@@ -344,27 +365,25 @@ body {
   letter-spacing: -0.02em;
 }
 
-.billing-type-hint {
-  font-size: 0.86rem;
-  line-height: 1.55;
-  color: var(--muted);
-  padding: 14px 16px;
-  margin: 0 0 18px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface2) 88%, var(--accent2));
+/* טבלאות חיובים/תשלומים: חיוב אדום, תשלום ירוק */
+.billing-tx-table tbody tr.billing-tx-row--charge > td {
+  color: #c92a2a;
 }
 
-.billing-type-hint p {
-  margin: 0 0 10px;
+.billing-tx-table tbody tr.billing-tx-row--payment > td {
+  color: #2b8a3e;
 }
 
-.billing-type-hint p:last-child {
-  margin-bottom: 0;
-}
-
-.billing-type-hint strong {
-  color: var(--text);
+/* עמודת פעולות — לא מיורשת צבע (כפתור מחק) */
+.billing-tx-table-all
+  tbody
+  tr.billing-tx-row--charge
+  > td:last-child,
+.billing-tx-table-all
+  tbody
+  tr.billing-tx-row--payment
+  > td:last-child {
+  color: inherit;
 }
 
 .cards {
@@ -737,6 +756,94 @@ label.field {
   font-weight: 800;
 }
 
+.sheet__titleWithLogo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.add-customer-truecaller-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: right;
+}
+
+.add-customer-tc-ico {
+  flex-shrink: 0;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #0a7cff 22%, transparent);
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.contact-pick-err {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger, #b42318) 12%, var(--surface2));
+  color: var(--danger, #b42318);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.sheet--calllog {
+  max-height: min(90dvh, 640px);
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
+}
+
+.calllog-pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: min(52dvh, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+button.calllog-pick-row {
+  width: 100%;
+  text-align: right;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: inherit;
+  color: inherit;
+  align-items: stretch;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+button.calllog-pick-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--surface);
+}
+
+.calllog-pick-name {
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.calllog-pick-phone {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.calllog-pick-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -1002,6 +1109,131 @@ tr:last-child td {
 .insight-text {
   margin: 6px 0 0;
   font-size: 1rem;
+}
+
+.insight-stat-link {
+  display: inline;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.insight-stat-link:hover {
+  opacity: 0.88;
+}
+
+.insight-metric-hit {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+  width: 100%;
+  word-break: break-word;
+}
+
+.insight-metric-hit:hover {
+  opacity: 0.88;
+}
+
+.money-kpi-hit {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.money-kpi-hit:hover {
+  opacity: 0.9;
+}
+
+.insight-metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.insight-metric-tile {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.insight-metric-tile--alert {
+  border-color: color-mix(in srgb, #ef4444 35%, var(--border));
+  background: color-mix(in srgb, #ef4444 8%, var(--surface2));
+}
+
+.insight-metric-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.insight-metric-value {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.money-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface) 60%, #e8f4fc);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.money-kpi-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.money-kpi-num {
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.money-kpi-num--charge {
+  color: #c2410c;
+}
+
+.money-kpi-num--paid {
+  color: #15803d;
 }
 
 .chart-grid {
@@ -1530,6 +1762,13 @@ tr:last-child td {
   max-height: 56px;
 }
 
+/* לוח בקרה / כותרת / התחברות — רוחב גדול יותר */
+.aiad-logo--compact {
+  width: min(260px, 78vw);
+  max-height: 52px;
+  opacity: 0.95;
+}
+
 /* הדפסה / PDF: לוגו בולט וממורכז */
 .aiad-logo--print {
   width: min(360px, 92vw);
@@ -1571,6 +1810,43 @@ tr:last-child td {
   flex-direction: column;
   gap: 14px;
   margin: 16px 0;
+}
+
+/* גלילה אחרי «ערוך» — margin לכותרת sticky */
+.quote-editor-top-anchor {
+  scroll-margin-top: 96px;
+}
+
+/* עריכת הצעה — מסך מלא, לא חלונית */
+.quote-edit-full {
+  min-height: 60vh;
+  padding-bottom: 32px;
+}
+
+.quote-edit-full-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px 16px;
+  margin-bottom: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.quote-edit-back {
+  flex-shrink: 0;
+}
+
+.quote-edit-full-title {
+  margin: 0;
+  flex: 1 1 200px;
+}
+
+.quote-edit-full-sub {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--muted, #94a3b8);
+  margin-right: 0.35em;
 }
 
 /* עורך «הצעת מחיר חדשה» — טבלה: פריט | כמות | מחיר יחידה | מחיר שורה */
@@ -1621,6 +1897,11 @@ tr:last-child td {
   width: 4.25rem;
   max-width: 100%;
   text-align: center;
+}
+
+.quote-editor-unit.table-inline-input {
+  width: 5.5rem;
+  max-width: 100%;
 }
 
 @media (max-width: 639px) {
@@ -1856,10 +2137,15 @@ tr:last-child td {
     display: none !important;
   }
 
+  /* רק לדף הצעת מחיר: להסתיר את הטפסים ולהדפיס את גיליון ההדפסה */
+  .quotes-page > main {
+    display: none !important;
+  }
+
   .print-quote-portal {
     position: static;
     padding: 0;
-    display: block;
+    display: block !important;
   }
 
   #root {
@@ -1910,6 +2196,50 @@ tr:last-child td {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+}
+
+.login-brand-mark {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+/* לוגו איאד — לוח בקרה, מעל «סיכום מהיר» */
+.dash-header-brand {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 10px;
+}
+
+.dash-header-brand .aiad-logo--compact {
+  width: min(320px, 88vw);
+  max-height: 56px;
+}
+
+/* לוח בקרה — כרטיס חובות בולט באדום */
+.stat-card-debts {
+  border-color: color-mix(in srgb, #dc2626 38%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #dc2626 14%, var(--surface2)) 0%,
+    var(--surface2) 100%
+  );
+  box-shadow:
+    0 12px 28px color-mix(in srgb, #dc2626 18%, transparent),
+    var(--shadow);
+}
+
+.stat-card-debts .stat-card-label,
+.stat-card-debts .stat-card-sub,
+.stat-card-debts strong,
+.stat-card-debts strong.pill-overdue {
+  color: #ef4444 !important;
+  font-weight: 800;
+}
+
+.stat-card-debts .stat-card-sub {
+  color: #f87171 !important;
+  font-weight: 600 !important;
 }
 
 .login-title {

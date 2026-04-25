@@ -53,7 +53,7 @@ export function ColorLegend({ variant = 'default' }: Props) {
             <div className="legend-panel-inner">
               <p className="legend-intro">
                 <strong>פס צבע בכרטיס</strong> = רמת דחיפות שקבעת (לא קשור לתאריך
-                חזרה). <strong>תג קבוצה</strong> = סוג עבודה (שירות / התקנה /
+                ביקור). <strong>תג קבוצה</strong> = סוג עבודה (שירות / התקנה /
                 השלמה).
               </p>
               <div className="legend-grid">

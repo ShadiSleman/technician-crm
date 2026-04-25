@@ -2,7 +2,8 @@
 export function AiadLogoMark({
   variant = 'screen',
 }: {
-  variant?: 'screen' | 'print'
+  /** compact = לשורות כותרת / לוח בקרה (קטן ולא בולט) */
+  variant?: 'screen' | 'print' | 'compact'
 }) {
   const src = `${import.meta.env.BASE_URL}aiad-logo.png`
   return (

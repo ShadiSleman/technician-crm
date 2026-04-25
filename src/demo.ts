@@ -1,4 +1,4 @@
-import type { AppData, CallLog, PriceListItem } from './types'
+import type { AppData, PriceListItem } from './types'
 
 function ymd(d: Date): string {
   const y = d.getFullYear()
@@ -482,76 +482,6 @@ export function createDemoData(): AppData {
   const c7 = 'demo-c7'
   const c8 = 'demo-c8'
 
-  const callAt = (daysAgo: number, h: number, m: number) =>
-    atHours(addDays(-daysAgo), h, m)
-
-  const callLogs: CallLog[] = [
-    {
-      id: 'cl1',
-      at: callAt(0, 9, 12),
-      direction: 'in',
-      phone: '050-1234567',
-      customerId: c1,
-      note: 'רעש במזגן — לחזור',
-    },
-    {
-      id: 'cl2',
-      at: callAt(0, 11, 40),
-      direction: 'in',
-      phone: '052-9876543',
-      customerId: c2,
-      note: 'אישור שעת התקנה',
-    },
-    {
-      id: 'cl3',
-      at: callAt(1, 16, 5),
-      direction: 'out',
-      phone: '054-1112233',
-      customerId: c3,
-      note: 'תזכורת תשלום',
-    },
-    {
-      id: 'cl4',
-      at: callAt(2, 8, 55),
-      direction: 'in',
-      phone: '050-0001111',
-      customerId: c4,
-      note: 'מתי מגיע החלק?',
-    },
-    {
-      id: 'cl5',
-      at: callAt(2, 14, 20),
-      direction: 'in',
-      phone: '053-9998877',
-      customerId: null,
-      note: 'מספר לא שמור — בקשת הצעה',
-    },
-    {
-      id: 'cl6',
-      at: callAt(3, 10, 0),
-      direction: 'out',
-      phone: '052-1112233',
-      customerId: c6,
-      note: 'עדכון הגעה',
-    },
-    {
-      id: 'cl7',
-      at: callAt(4, 18, 30),
-      direction: 'in',
-      phone: '054-7654321',
-      customerId: c7,
-      note: 'דליפה במזגן סלון',
-    },
-    {
-      id: 'cl8',
-      at: callAt(5, 12, 15),
-      direction: 'in',
-      phone: '050-2223344',
-      customerId: null,
-      note: 'ניתוק שיחה — לחזור',
-    },
-  ]
-
   return {
     customers: [
       {
@@ -796,7 +726,6 @@ export function createDemoData(): AppData {
         notes: 'לוודא צ׳ק',
       },
     ],
-    callLogs,
     priceList: buildSeedPriceList(now),
     quotes: [
       {

@@ -114,9 +114,9 @@ export function WorkCalendar({
               ))}
             </ul>
           )}
-          <h4 className="cal-section-title">חזרות ללקוחות</h4>
+          <h4 className="cal-section-title">ביקורים ללקוחות</h4>
           {cbs.length === 0 ? (
-            <p className="muted">אין תאריכי חזרה ליום הזה</p>
+            <p className="muted">אין תאריכי ביקור ליום הזה</p>
           ) : (
             <ul className="cal-events">
               {cbs.map((c) => (
@@ -194,7 +194,7 @@ export function WorkCalendar({
                     <span className="dot dot-meet">{ms.length} פגישות</span>
                   ) : null}
                   {cbs.length > 0 ? (
-                    <span className="dot dot-cb">{cbs.length} חזרות</span>
+                    <span className="dot dot-cb">{cbs.length} ביקורים</span>
                   ) : null}
                 </div>
               </motion.div>
@@ -295,7 +295,7 @@ export function WorkCalendar({
       </div>
       <p className="muted cal-legend-mini">
         <i className="badge-dot meet inline" /> פגישה ·{' '}
-        <i className="badge-dot cb inline" /> חזרה ללקוח — לחיצה על יום פותחת
+        <i className="badge-dot cb inline" /> ביקור ללקוח — לחיצה על יום פותחת
         תצוגת יום
       </p>
     </div>

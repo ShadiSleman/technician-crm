@@ -35,6 +35,16 @@ export const STATUS_LABEL: Record<CustomerStatus, string> = {
   done: 'סגור',
 }
 
+/** צבעי סטטוס בגרפי ניתוח (כרטיסים פתוחים) */
+export const STATUS_CHART_COLOR: Record<CustomerStatus, string> = {
+  new: '#3b82f6',
+  callback: '#8b5cf6',
+  waiting_parts: '#f59e0b',
+  pending_payment: '#ef4444',
+  scheduled: '#10b981',
+  done: '#94a3b8',
+}
+
 /** צבעים לגרפים ולתגיות קבוצה */
 export const GROUP_CHART_COLOR: Record<WorkGroup, string> = {
   service: '#6366f1',

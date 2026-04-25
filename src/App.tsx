@@ -1,8 +1,12 @@
 import { App as CapacitorApp } from '@capacitor/app'
+import { AiadLogoMark } from './components/AiadLogoMark'
 import { Capacitor } from '@capacitor/core'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnalysisCharts } from './components/AnalysisCharts'
+import {
+  AnalysisCharts,
+  type AnalysisNavigate,
+} from './components/AnalysisCharts'
 import { ColorLegend } from './components/ColorLegend'
 import { PriceCatalogPage } from './components/PriceCatalogPage'
 import { QuotesPage } from './components/QuotesPage'
@@ -16,19 +20,29 @@ import {
 } from './copy'
 import { createDemoData } from './demo'
 import { addDaysYmd, formatHebYmd, todayYmd } from './dates'
+import { downloadBackupJson } from './backupExport'
+import { FULL_RESET_PASSWORD } from './resetPassword'
 import {
   dedupePriceList,
-  exportJson,
   importAppData,
   loadAppData,
   mergeInitialPriceListSeed,
   normalizeAppData,
   saveAppData,
 } from './storage'
-import { pickDeviceContact } from './pickDeviceContact'
+import { TruecallerLogoMark } from './components/TruecallerLogoMark'
+import {
+  loadDeviceContactsForPicker,
+  pickOneContactFromSystem,
+  type DeviceContactRow,
+} from './deviceContactsList'
+import {
+  callTypeLabelHe,
+  fetchRecentCallsForImport,
+  type RecentCallEntry,
+} from './recentCalls'
 import type {
   AppData,
-  CallLog,
   Customer,
   CustomerStatus,
   PaymentMethod,
@@ -60,7 +74,6 @@ function getInitialData() {
     loaded.customers.length === 0 &&
     loaded.transactions.length === 0 &&
     loaded.meetings.length === 0 &&
-    loaded.callLogs.length === 0 &&
     loaded.priceList.length === 0 &&
     loaded.quotes.length === 0
   ) {
@@ -69,8 +82,14 @@ function getInitialData() {
   return loaded
 }
 
+/** כרטיסים סגורים (סטטוס «סגור») תמיד בסוף הרשימה */
 function sortCustomers(list: Customer[]): Customer[] {
   return [...list].sort((a, b) => {
+    const aDone = a.status === 'done' ? 1 : 0
+    const bDone = b.status === 'done' ? 1 : 0
+    if (aDone !== bDone) {
+      return aDone - bDone
+    }
     const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
     if (pd !== 0) return pd
     if (a.callbackDate && b.callbackDate) {
@@ -112,19 +131,6 @@ function digitsOnly(s: string): string {
   return s.replace(/\D/g, '')
 }
 
-function findCustomerIdByPhone(
-  phone: string,
-  customers: Customer[],
-): string | null {
-  const d = digitsOnly(phone)
-  if (d.length < 7) return null
-  const c = customers.find((x) => {
-    const xd = digitsOnly(x.phone)
-    return xd === d || xd.endsWith(d.slice(-9)) || d.endsWith(xd.slice(-9))
-  })
-  return c?.id ?? null
-}
-
 type AppProps = {
   /** כתובת API (כולל /api) — כשמוגדרת ב-VITE_API_URL */
   remoteApiBase?: string
@@ -144,6 +150,8 @@ export default function App({
   const [data, setData] = useState<AppData>(() =>
     isRemote ? emptyAppData() : getInitialData(),
   )
+  const dataRef = useRef(data)
+  dataRef.current = data
 
   const remoteHydrated = useRef(false)
   const remoteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -152,10 +160,6 @@ export default function App({
     mode: 'new' | 'edit'
     id?: string
     draft: ReturnType<typeof emptyCustomer>
-  } | null>(null)
-  const [callContext, setCallContext] = useState<{
-    phone: string
-    note: string
   } | null>(null)
   const [callModal, setCallModal] = useState(false)
   const [callDraft, setCallDraft] = useState({ phone: '', note: '' })
@@ -166,16 +170,27 @@ export default function App({
     'all',
   )
   const [onlyOverdue, setOnlyOverdue] = useState(false)
+  /** מסתיר כרטיסים «סגור» ברשימת לקוחות (מנותב ממסך ניתוח) */
+  const [onlyOpen, setOnlyOpen] = useState(false)
 
   const [dashOpen, setDashOpen] = useState({
     work: false,
-    calls: false,
+    done: false,
   })
 
   const [addCustomerStep, setAddCustomerStep] = useState<
-    null | 'choose' | 'paste'
+    null | 'choose' | 'calllog' | 'contactpick'
   >(null)
-  const [phonePasteDraft, setPhonePasteDraft] = useState('')
+  const [callLogRows, setCallLogRows] = useState<RecentCallEntry[]>([])
+  const [callLogLoading, setCallLogLoading] = useState(false)
+  const [contactPickRows, setContactPickRows] = useState<DeviceContactRow[]>(
+    [],
+  )
+  const [contactPickLoading, setContactPickLoading] = useState(false)
+  const [contactPickFilter, setContactPickFilter] = useState('')
+  const [contactPickLoadError, setContactPickLoadError] = useState<
+    string | null
+  >(null)
 
   const [calMode, setCalMode] = useState<CalMode>('week')
   const [calAnchor, setCalAnchor] = useState(() => new Date())
@@ -204,30 +219,111 @@ export default function App({
     nonce: number
   } | null>(null)
 
-  const refreshWorkspaceFromServer = useCallback(async () => {
-    if (!isRemote || !remoteApiBase || !remoteToken || !onRemoteLogout) return
+  const refreshWorkspaceFromServer = useCallback(async (): Promise<AppData | null> => {
+    if (!isRemote || !remoteApiBase || !remoteToken || !onRemoteLogout)
+      return null
     try {
       const r = await fetch(`${remoteApiBase}/workspace`, {
         headers: { Authorization: `Bearer ${remoteToken}` },
       })
       if (r.status === 401) {
         onRemoteLogout()
-        return
+        return null
       }
       if (!r.ok) {
         alert('רענון מהענן נכשל. נסו שוב עוד מעט.')
-        return
+        return null
       }
       const body = (await r.json()) as { data?: unknown }
       const normalized = normalizeAppData(
         (body.data ?? null) as Partial<AppData> | null,
       )
-      setData(mergeInitialPriceListSeed(normalized))
+      const merged = mergeInitialPriceListSeed(normalized)
+      setData(merged)
+      return merged
     } catch (e) {
       console.warn('[CRM] רענון משרת', e)
       alert('שגיאת רשת — לא נטענו עדכונים.')
+      return null
     }
   }, [isRemote, remoteApiBase, remoteToken, onRemoteLogout])
+
+  const flushWorkspaceToServer = useCallback(async () => {
+    if (
+      !isRemote ||
+      !remoteHydrated.current ||
+      !remoteApiBase ||
+      !remoteToken ||
+      !onRemoteLogout
+    ) {
+      if (!isRemote) saveAppData(dataRef.current)
+      return
+    }
+    if (remoteSaveTimer.current) {
+      clearTimeout(remoteSaveTimer.current)
+      remoteSaveTimer.current = null
+    }
+    const d = dataRef.current
+    const pl = dedupePriceList(d.priceList)
+    const same =
+      pl.length === d.priceList.length &&
+      pl.every((p, i) => p.id === d.priceList[i]?.id)
+    const payload: AppData = same ? d : { ...d, priceList: pl }
+    if (!same) {
+      setData(payload)
+    }
+    try {
+      const r = await fetch(`${remoteApiBase}/workspace`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${remoteToken}`,
+        },
+        body: JSON.stringify({ data: payload }),
+      })
+      if (r.status === 401) onRemoteLogout()
+      else if (!r.ok) {
+        const errText = await r.text().catch(() => '')
+        console.warn('[CRM] שמירה מיידית נכשלה', r.status, errText.slice(0, 200))
+        alert('השמירה לענן נכשלה. בדקו חיבור.')
+      }
+    } catch (e) {
+      console.warn('[CRM] שמירה מיידית — שגיאת רשת', e)
+      alert('שגיאת רשת — לא נשמר לענן.')
+    }
+  }, [isRemote, remoteApiBase, remoteToken, onRemoteLogout])
+
+  /** רענון כשחוזרים ללשונית/לאפליקציה (עדכוני Mongo בלי לסגור) */
+  const lastAutoRefetchAt = useRef(0)
+  useEffect(() => {
+    if (!isRemote) return
+    const run = (source: 'vis' | 'focus') => {
+      if (source === 'vis' && document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - lastAutoRefetchAt.current < 4000) return
+      lastAutoRefetchAt.current = now
+      void refreshWorkspaceFromServer()
+    }
+    const onVis = () => run('vis')
+    const onFocus = () => run('focus')
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [isRemote, refreshWorkspaceFromServer])
+
+  useEffect(() => {
+    if (tab !== 'pricelist' || !isRemote) return
+    const t = setTimeout(() => {
+      const now = Date.now()
+      if (now - lastAutoRefetchAt.current < 2000) return
+      lastAutoRefetchAt.current = now
+      void refreshWorkspaceFromServer()
+    }, 200)
+    return () => clearTimeout(t)
+  }, [tab, isRemote, refreshWorkspaceFromServer])
 
   useEffect(() => {
     if (!isRemote || !remoteApiBase || !remoteToken || !onRemoteLogout) {
@@ -324,7 +420,7 @@ export default function App({
 
   const uiRef = useRef({
     callModal: false,
-    addCustomerStep: null as null | 'choose' | 'paste',
+    addCustomerStep: null as null | 'choose' | 'calllog' | 'contactpick',
     customerModal: false,
     tab: 'dashboard' as Tab,
   })
@@ -343,7 +439,11 @@ export default function App({
         setCallModal(false)
         return
       }
-      if (u.addCustomerStep === 'paste') {
+      if (u.addCustomerStep === 'calllog') {
+        setAddCustomerStep('choose')
+        return
+      }
+      if (u.addCustomerStep === 'contactpick') {
         setAddCustomerStep('choose')
         return
       }
@@ -352,7 +452,6 @@ export default function App({
         return
       }
       if (u.customerModal) {
-        setCallContext(null)
         setAddCustomerStep(null)
         setCustomerModal(null)
         return
@@ -373,12 +472,28 @@ export default function App({
     [data.customers],
   )
 
+  const contactPickFiltered = useMemo(() => {
+    const q = contactPickFilter.trim().toLowerCase()
+    if (!q) return contactPickRows
+    const qd = q.replace(/\D/g, '')
+    return contactPickRows.filter((r) => {
+      if (r.name.toLowerCase().includes(q)) return true
+      if (r.phoneRaw.toLowerCase().includes(q)) return true
+      if (qd.length >= 2) {
+        const d = r.phoneRaw.replace(/\D/g, '')
+        if (d.includes(qd) || d.endsWith(qd)) return true
+      }
+      return false
+    })
+  }, [contactPickRows, contactPickFilter])
+
   const filteredCustomers = useMemo(() => {
     return customersSorted.filter((c) => {
       if (filterGroup !== 'all' && c.group !== filterGroup) return false
       if (filterPriority !== 'all' && c.priority !== filterPriority)
         return false
       if (filterStatus !== 'all' && c.status !== filterStatus) return false
+      if (onlyOpen && c.status === 'done') return false
       if (onlyOverdue) {
         if (
           !(
@@ -398,6 +513,7 @@ export default function App({
     filterPriority,
     filterStatus,
     onlyOverdue,
+    onlyOpen,
   ])
 
   const today = todayYmd()
@@ -453,12 +569,12 @@ export default function App({
     }
   }, [data.customers, today])
 
-  const recentCalls = useMemo(
+  const closedCards = useMemo(
     () =>
-      [...data.callLogs].sort(
-        (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+      sortCustomers(
+        data.customers.filter((c) => c.status === 'done'),
       ),
-    [data.callLogs],
+    [data.customers],
   )
 
   const paymentTracker = useMemo(() => {
@@ -498,19 +614,8 @@ export default function App({
             : c,
         ),
       }))
-      setCallContext(null)
     } else {
       const newId = crypto.randomUUID()
-      const logFromCall =
-        callContext &&
-        ({
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          direction: 'in' as const,
-          phone: callContext.phone.trim() || payload.phone.trim(),
-          note: callContext.note.trim() || 'נוצר משיחה נכנסת',
-          customerId: newId,
-        } satisfies CallLog)
       setData((d) => ({
         ...d,
         customers: [
@@ -522,9 +627,7 @@ export default function App({
             updatedAt: now,
           },
         ],
-        callLogs: logFromCall ? [logFromCall, ...d.callLogs] : d.callLogs,
       }))
-      setCallContext(null)
     }
     setCustomerModal(null)
   }
@@ -539,9 +642,6 @@ export default function App({
       ),
       meetings: d.meetings.map((m) =>
         m.customerId === id ? { ...m, customerId: null } : m,
-      ),
-      callLogs: d.callLogs.map((cl) =>
-        cl.customerId === id ? { ...cl, customerId: null } : cl,
       ),
     }))
     setCustomerModal(null)
@@ -655,44 +755,110 @@ export default function App({
   }
 
   function openNewCustomer() {
-    setCallContext(null)
     setAddCustomerStep(null)
     setCustomerModal({ mode: 'new', draft: emptyCustomer() })
   }
 
   function openAddCustomerMenu() {
     setAddCustomerStep('choose')
-    setPhonePasteDraft('')
+    setContactPickFilter('')
+    setContactPickLoadError(null)
   }
 
-  async function openNewCustomerFromDeviceContact() {
-    const res = await pickDeviceContact()
-    if (!res) {
-      if (Capacitor.isNativePlatform()) {
-        alert(
-          'לא נבחר איש קשר או חסרה הרשאה. נפתח בורר אנשי הקשר של המכשיר — אנשי קשר שמופיעים שם כוללים גם כאלה שנשמרו מ־Truecaller (כשמסנכרנים לאנשי הקשר). אין גישה ישירה לאפליקציית Truecaller עצמה.',
-        )
-      } else {
-        alert(
-          'בחירה מרשימת אנשי קשר זמינה באפליקציה על האנדרואיד. בדפדפן השתמשו בהזנה ידנית.',
-        )
+  function openContactPickStep() {
+    setAddCustomerStep('contactpick')
+    setContactPickLoading(true)
+    setContactPickRows([])
+    setContactPickFilter('')
+    setContactPickLoadError(null)
+    void loadDeviceContactsForPicker(500)
+      .then((res) => {
+        setContactPickRows(res.rows)
+        setContactPickLoadError(res.error)
+      })
+      .catch((e) => {
+        console.warn('[openContactPickStep]', e)
+        setContactPickRows([])
+        setContactPickLoadError('שגיאה בטעינת אנשי הקשר. נסו «בחירה מהמערכת».')
+      })
+      .finally(() => {
+        setContactPickLoading(false)
+      })
+  }
+
+  async function trySystemContactPicker() {
+    setContactPickLoading(true)
+    setContactPickLoadError(null)
+    try {
+      const r = await pickOneContactFromSystem()
+      if (r) {
+        selectContactPickRow(r)
+        return
       }
-      return
+      setContactPickLoadError(
+        'לא נבחר איש קשר, או שאין מספר. נסו שוב או הזינו ידנית.',
+      )
+    } finally {
+      setContactPickLoading(false)
     }
+  }
+
+  function openCallLogStep() {
+    setAddCustomerStep('calllog')
+    setCallLogLoading(true)
+    setCallLogRows([])
+    void fetchRecentCallsForImport(2000).then((rows) => {
+      setCallLogRows(rows)
+      setCallLogLoading(false)
+    })
+  }
+
+  function selectCallLogRow(c: RecentCallEntry) {
     setAddCustomerStep(null)
-    setPhonePasteDraft('')
+    setCallLogRows([])
+    const phone = formatPhoneFromDigits(c.phoneRaw)
+    const rawPhone = c.phoneRaw.replace(/\D/g, '')
+    const name =
+      (c.name || '').trim() ||
+      (rawPhone.length >= 4
+        ? `לקוח ·${rawPhone.slice(-4)}`
+        : 'לקוח חדש')
+    setCustomerModal({
+      mode: 'new',
+      draft: {
+        ...emptyCustomer(),
+        name,
+        phone: phone || c.phoneRaw.replace(/\s/g, ''),
+        status: 'callback',
+        priority: 'high',
+        callbackDate: todayYmd(),
+        notes: 'מיומן שיחות',
+      },
+    })
+  }
+
+  function selectContactPickRow(r: DeviceContactRow) {
+    setAddCustomerStep(null)
+    setContactPickRows([])
+    setContactPickFilter('')
+    setContactPickLoadError(null)
     const phone =
-      res.phone && digitsOnly(res.phone).length >= 7
-        ? formatPhoneFromDigits(res.phone)
+      digitsOnly(r.phoneRaw).length >= 7
+        ? formatPhoneFromDigits(r.phoneRaw)
         : ''
     setCustomerModal({
       mode: 'new',
       draft: {
         ...emptyCustomer(),
-        name: res.name,
-        phone,
+        name: r.name,
+        phone: phone || r.phoneRaw.replace(/\s/g, ''),
       },
     })
+    if (!phone) {
+      alert(
+        'לא נמצא מספר תקין לאיש הקשר. ניתן להקליד ידנית בכרטיס.',
+      )
+    }
   }
 
   function formatPhoneFromDigits(d: string): string {
@@ -707,42 +873,7 @@ export default function App({
     return ''
   }
 
-  async function pastePhoneFromClipboard() {
-    try {
-      const t = await navigator.clipboard.readText()
-      const f = formatPhoneFromDigits(t)
-      if (f) setPhonePasteDraft(f)
-      else alert('לא זיהינו מספר טלפון בלוח. נסו להעתיק רק את המספר.')
-    } catch {
-      alert(
-        'לא ניתן לקרוא את הלוח. אפשר לאשר הרשאה בדפדפן/אפליקציה, או להקליד את המספר ידנית.',
-      )
-    }
-  }
-
-  function confirmPastedPhoneCustomer() {
-    const f = formatPhoneFromDigits(phonePasteDraft)
-    if (!f || digitsOnly(f).length < 7) {
-      alert('נא להזין או להדביק מספר טלפון תקין')
-      return
-    }
-    setAddCustomerStep(null)
-    setPhonePasteDraft('')
-    setCustomerModal({
-      mode: 'new',
-      draft: {
-        ...emptyCustomer(),
-        phone: f,
-        status: 'callback',
-        priority: 'high',
-        callbackDate: todayYmd(),
-        notes: 'מיומן השיחות בטלפון',
-      },
-    })
-  }
-
   function openEditCustomer(c: Customer) {
-    setCallContext(null)
     setCustomerModal({
       mode: 'edit',
       id: c.id,
@@ -759,24 +890,62 @@ export default function App({
     })
   }
 
-  function saveCallLogOnly() {
-    const phone = callDraft.phone.trim()
-    if (!phone) {
-      alert('נא להזין מספר טלפון')
-      return
+  const handleAnalysisNavigate = useCallback((action: AnalysisNavigate) => {
+    setOnlyOverdue(false)
+    switch (action.type) {
+      case 'billing':
+        setTab('billing')
+        return
+      case 'calendar':
+        setTab('calendar')
+        return
+      case 'quotes':
+        setTab('quotes')
+        return
+      case 'customers_open':
+        setFilterGroup('all')
+        setFilterPriority('all')
+        setFilterStatus('all')
+        setOnlyOpen(true)
+        setTab('customers')
+        return
+      case 'customers_done':
+        setFilterGroup('all')
+        setFilterPriority('all')
+        setFilterStatus('done')
+        setOnlyOpen(false)
+        setTab('customers')
+        return
+      case 'customers_group':
+        setFilterGroup(action.group)
+        setFilterPriority('all')
+        setFilterStatus('all')
+        setOnlyOpen(true)
+        setTab('customers')
+        return
+      case 'customers_priority':
+        setFilterGroup('all')
+        setFilterPriority(action.priority)
+        setFilterStatus('all')
+        setOnlyOpen(true)
+        setTab('customers')
+        return
+      case 'customers_status':
+        setFilterGroup('all')
+        setFilterPriority('all')
+        setFilterStatus(action.status)
+        setOnlyOpen(false)
+        setTab('customers')
+        return
     }
-    const matched = findCustomerIdByPhone(phone, data.customers)
-    const entry: CallLog = {
-      id: crypto.randomUUID(),
-      at: new Date().toISOString(),
-      direction: 'in',
-      phone,
-      note: callDraft.note.trim() || 'שיחה נכנסת',
-      customerId: matched,
+  }, [])
+
+  function openEditCustomerById(id: string) {
+    const c = data.customers.find((x) => x.id === id)
+    if (c) {
+      openEditCustomer(c)
+      setTab('customers')
     }
-    setData((d) => ({ ...d, callLogs: [entry, ...d.callLogs] }))
-    setCallDraft({ phone: '', note: '' })
-    setCallModal(false)
   }
 
   function startNewCustomerFromCall() {
@@ -786,10 +955,6 @@ export default function App({
       alert('נא להזין מספר טלפון')
       return
     }
-    setCallContext({
-      phone,
-      note: note || 'שיחה נכנסת',
-    })
     setCallDraft({ phone: '', note: '' })
     setCallModal(false)
     setCustomerModal({
@@ -835,7 +1000,7 @@ export default function App({
         </p>
         {c.callbackDate ? (
           <p className={overdue ? 'meta pill-overdue' : 'meta'}>
-            חזרה: {formatHebYmd(c.callbackDate)}
+            ביקור: {formatHebYmd(c.callbackDate)}
             {overdue ? ' · באיחור' : c.callbackDate === today ? ' · היום' : ''}
           </p>
         ) : null}
@@ -945,15 +1110,6 @@ export default function App({
       <header className="app-header">
         <div className="app-brand">
           <h1 className="app-title">מעקב לקוחות · מזגנים</h1>
-          <div className="app-header-actions">
-            <button
-              type="button"
-              className="btn btn-ghost header-mini-btn"
-              onClick={() => setCallModal(true)}
-            >
-              שיחה ליומן
-            </button>
-          </div>
         </div>
         <nav className="tabs" aria-label="ניווט ראשי">
           {(
@@ -994,6 +1150,9 @@ export default function App({
 
       {tab === 'dashboard' && (
         <main>
+          <div className="dash-header-brand">
+            <AiadLogoMark variant="compact" />
+          </div>
           <h2 className="section-title">סיכום מהיר</h2>
           <div className="cards cards-grid-2">
             {[
@@ -1001,7 +1160,7 @@ export default function App({
                 k: 'overdue',
                 v: dashboard.overdue.length,
                 l: 'באיחור',
-                sub: 'תאריך החזרה לפני היום',
+                sub: 'תאריך ביקור לפני היום',
                 danger: true,
                 onClick: () => {
                   setFilterGroup('all')
@@ -1016,7 +1175,7 @@ export default function App({
                 v:
                   dashboard.dueToday.length + dashboard.meetingsToday.length,
                 l: 'היום',
-                sub: `חזרות ללקוח ${dashboard.dueToday.length} · מהיומן ${dashboard.meetingsToday.length}`,
+                sub: `ביקורים מתוכננים ${dashboard.dueToday.length} · מהיומן ${dashboard.meetingsToday.length}`,
                 danger: false,
                 onClick: () => {
                   setCalMode('day')
@@ -1044,7 +1203,8 @@ export default function App({
                 v: `₪${dashboard.totalOwed.toLocaleString('he-IL')}`,
                 l: `חובות פתוחים (${dashboard.owedCount})`,
                 sub: 'יתרה חיובית לפי רישום',
-                danger: false,
+                danger: true,
+                cardClass: 'stat-card-debts',
                 onClick: () => setTab('billing'),
               },
             ].map((s, i) => (
@@ -1064,65 +1224,6 @@ export default function App({
                 <span className="stat-card-sub">{s.sub}</span>
               </motion.button>
             ))}
-          </div>
-
-          <div className="dash-acc dash-acc-calls">
-            <button
-              type="button"
-              className="dash-acc-head"
-              aria-expanded={dashOpen.calls}
-              onClick={() => setDashOpen((s) => ({ ...s, calls: !s.calls }))}
-            >
-              <span>יומן שיחות באפליקציה</span>
-              <span className="dash-acc-count">{recentCalls.length}</span>
-            </button>
-            {dashOpen.calls ? (
-              <div className="dash-acc-body">
-                <p className="muted dash-call-hint">
-                  רישום מהיר: &quot;שיחה ליומן&quot; למעלה · הוספת לקוח: כפתור ירוק
-                </p>
-                <ul className="call-log-list">
-                  <AnimatePresence initial={false}>
-                    {recentCalls.slice(0, 20).map((cl) => (
-                      <motion.li
-                        key={cl.id}
-                        layout
-                        initial={{ opacity: 0, x: 16 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0 }}
-                        className={`call-log-item ${cl.direction === 'in' ? 'in' : 'out'}`}
-                      >
-                        <div className="call-log-top">
-                          <span>
-                            <a href={`tel:${cl.phone.replace(/\s/g, '')}`}>
-                              {cl.phone}
-                            </a>
-                            {cl.customerId
-                              ? ` · ${customerName(cl.customerId)}`
-                              : ''}
-                          </span>
-                          <span className="call-dir">
-                            {cl.direction === 'in' ? 'נכנסת' : 'יוצאת'}
-                          </span>
-                        </div>
-                        <span className="muted">
-                          {new Date(cl.at).toLocaleString('he-IL', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}{' '}
-                          · {cl.note}
-                        </span>
-                      </motion.li>
-                    ))}
-                  </AnimatePresence>
-                </ul>
-                {recentCalls.length === 0 ? (
-                  <p className="muted">אין שיחות — התחילו מ&quot;שיחה ליומן&quot;</p>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
           <div className="dash-acc">
@@ -1161,13 +1262,13 @@ export default function App({
                     dashboard.meetingsToday.length > 0 ? (
                       <>
                         <h4 className="dash-block-title">
-                          היום — חזרות ופגישות (
+                          היום — ביקורים ופגישות (
                           {callbackBuckets.dueToday.length +
                             dashboard.meetingsToday.length}
                           )
                         </h4>
                         <p className="muted dash-block-hint">
-                          חזרות לפי תאריך החזרה בכרטיס; אירועי יומן בנפרד
+                          ביקורים לפי תאריך ביקור בכרטיס; אירועי יומן בנפרד
                         </p>
                         {dashboard.meetingsToday.length > 0 ? (
                           <div className="list">
@@ -1213,7 +1314,7 @@ export default function App({
                     {callbackBuckets.other.length > 0 ? (
                       <>
                         <h4 className="dash-block-title">
-                          עתידי / בלי תאריך חזרה ({callbackBuckets.other.length})
+                          עתידי / בלי תאריך ביקור ({callbackBuckets.other.length})
                         </h4>
                         <div className="list">
                           {callbackBuckets.other.map((c) =>
@@ -1228,6 +1329,33 @@ export default function App({
             ) : null}
           </div>
 
+          <div className="dash-acc">
+            <button
+              type="button"
+              className="dash-acc-head"
+              aria-expanded={dashOpen.done}
+              onClick={() => setDashOpen((s) => ({ ...s, done: !s.done }))}
+            >
+              <span>כרטיסים סגורים</span>
+              <span className="dash-acc-count">{closedCards.length}</span>
+            </button>
+            {dashOpen.done ? (
+              <div className="dash-acc-body">
+                <p className="muted dash-block-hint" style={{ marginBottom: 12 }}>
+                  כרטיסים במצב &quot;סגור&quot; — ברשימת הלקוחות הם מסודרים
+                  בסוף.
+                </p>
+                {closedCards.length === 0 ? (
+                  <p className="muted">אין כרטיסים סגורים</p>
+                ) : (
+                  <div className="list">
+                    {closedCards.map((c) => renderCustomerCard(c, true))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+
         </main>
       )}
 
@@ -1236,6 +1364,10 @@ export default function App({
           <AnalysisCharts
             customers={data.customers}
             transactions={data.transactions}
+            meetings={data.meetings}
+            quotes={data.quotes}
+            onNavigate={handleAnalysisNavigate}
+            onOpenCustomer={openEditCustomerById}
           />
         </main>
       )}
@@ -1265,9 +1397,27 @@ export default function App({
               <input
                 type="checkbox"
                 checked={onlyOverdue}
-                onChange={(e) => setOnlyOverdue(e.target.checked)}
+                onChange={(e) => {
+                  if (e.target.checked) setOnlyOpen(false)
+                  setOnlyOverdue(e.target.checked)
+                }}
               />
               רק באיחור
+            </label>
+            <label className="muted" style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={onlyOpen}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  if (on) {
+                    setOnlyOverdue(false)
+                    if (filterStatus === 'done') setFilterStatus('all')
+                  }
+                  setOnlyOpen(on)
+                }}
+              />
+              רק פתוחים
             </label>
           </div>
           <div className="form-grid two">
@@ -1305,9 +1455,11 @@ export default function App({
               <label className="field">סטטוס</label>
               <select
                 value={filterStatus}
-                onChange={(e) =>
-                  setFilterStatus(e.target.value as CustomerStatus | 'all')
-                }
+                onChange={(e) => {
+                  const v = e.target.value as CustomerStatus | 'all'
+                  setFilterStatus(v)
+                  if (v === 'done') setOnlyOpen(false)
+                }}
               >
                 <option value="all">הכל</option>
                 {(Object.keys(STATUS_LABEL) as CustomerStatus[]).map((s) => (
@@ -1329,7 +1481,13 @@ export default function App({
       )}
 
       {tab === 'pricelist' && (
-        <PriceCatalogPage data={data} setData={setData} />
+        <PriceCatalogPage
+          data={data}
+          setData={setData}
+          isRemote={isRemote}
+          onFlushToServer={flushWorkspaceToServer}
+          onRefreshFromServer={isRemote ? refreshWorkspaceFromServer : undefined}
+        />
       )}
 
       {tab === 'quotes' && (
@@ -1346,17 +1504,6 @@ export default function App({
       {tab === 'billing' && (
         <main>
           <h2 className="section-title">רישום חיוב / תשלום</h2>
-          <div className="billing-type-hint" role="note">
-            <p>
-              <strong>חיוב</strong> — סכום שאתה <strong>רושם לחוב הלקוח</strong>{' '}
-              (עלות עבודה, חלקים, ביקור). היתרה החיובית שלו <strong>עולה</strong>
-              — הוא חייב לך יותר.
-            </p>
-            <p>
-              <strong>תשלום</strong> — כסף ש<strong>התקבל</strong> מהלקוח (מזומן,
-              העברה, צ׳ק). היתרה <strong>יורדת</strong> — החוב קטן.
-            </p>
-          </div>
 
           <div className="payment-tracker-panel">
             <h3 className="section-title" style={{ marginTop: 0 }}>
@@ -1410,7 +1557,7 @@ export default function App({
                 {paymentTracker.txs.length === 0 ? (
                   <p className="muted">אין תנועות ללקוח זה</p>
                 ) : (
-                  <div className="table-wrap">
+                  <div className="table-wrap billing-tx-table">
                     <table>
                       <thead>
                         <tr>
@@ -1423,7 +1570,14 @@ export default function App({
                       </thead>
                       <tbody>
                         {paymentTracker.txs.map((t) => (
-                          <tr key={t.id}>
+                          <tr
+                            key={t.id}
+                            className={
+                              t.type === 'charge'
+                                ? 'billing-tx-row--charge'
+                                : 'billing-tx-row--payment'
+                            }
+                          >
                             <td>{formatHebYmd(t.date)}</td>
                             <td>{t.type === 'charge' ? 'חיוב' : 'תשלום'}</td>
                             <td>₪{t.amount.toLocaleString('he-IL')}</td>
@@ -1579,7 +1733,7 @@ export default function App({
           </div>
 
           <h2 className="section-title">כל התנועות</h2>
-          <div className="table-wrap">
+          <div className="table-wrap billing-tx-table billing-tx-table-all">
             <table>
               <thead>
                 <tr>
@@ -1596,7 +1750,14 @@ export default function App({
                 {[...data.transactions]
                   .sort((a, b) => b.date.localeCompare(a.date))
                   .map((t) => (
-                    <tr key={t.id}>
+                    <tr
+                      key={t.id}
+                      className={
+                        t.type === 'charge'
+                          ? 'billing-tx-row--charge'
+                          : 'billing-tx-row--payment'
+                      }
+                    >
                       <td>{formatHebYmd(t.date)}</td>
                       <td>{customerName(t.customerId)}</td>
                       <td>{t.type === 'charge' ? 'חיוב' : 'תשלום'}</td>
@@ -1741,14 +1902,18 @@ export default function App({
               type="button"
               className="btn btn-primary"
               onClick={() => {
-                const blob = new Blob([exportJson(data)], {
-                  type: 'application/json',
-                })
-                const a = document.createElement('a')
-                a.href = URL.createObjectURL(blob)
-                a.download = `technician-crm-backup-${today}.json`
-                a.click()
-                URL.revokeObjectURL(a.href)
+                void downloadBackupJson(data, today)
+                  .then(() => {
+                    /* native: share sheet; web: download */
+                  })
+                  .catch((e) => {
+                    console.error(e)
+                    alert(
+                      'ייצוא JSON נכשל. ' +
+                        (e instanceof Error ? e.message : String(e)) +
+                        '\n\nבמכשיר: בדקו שיתוף/קבצים. בדפדפן: נסו שוב או בדפדפן אחר.',
+                    )
+                  })
               }}
             >
               ייצוא JSON
@@ -1782,8 +1947,25 @@ export default function App({
               type="button"
               className="btn btn-danger"
               onClick={() => {
-                if (!confirm('לאפס את כל הנתונים?')) return
+                const pw = window.prompt(
+                  'איפוס מלא — הזינו את סיסמת האיפוס (מוגדרת בקוד ב־src/resetPassword.ts):',
+                )
+                if (pw === null) {
+                  return
+                }
+                if (pw.trim() !== FULL_RESET_PASSWORD) {
+                  alert('סיסמה שגויה. הנתונים לא נמחקו.')
+                  return
+                }
+                if (
+                  !confirm(
+                    'למחוק לצמיתות את כל הלקוחות, הכספים, פגישות, מחירון וההצעות? פעולה בלתי הפיכה.',
+                  )
+                ) {
+                  return
+                }
                 setData(emptyAppData())
+                alert('הנתונים אופסו (מאגר ריק).')
               }}
             >
               איפוס מלא
@@ -1839,19 +2021,30 @@ export default function App({
           >
             <h2 id="add-choose-title">הוספת לקוח חדש</h2>
             <p className="muted">
-              <strong>מאנשי הקשר במכשיר</strong> (מומלץ באנדרואיד): נפתח בורר של
-              המערכת עם שם ומספר. אנשי קשר שמסונכרנים מ־Truecaller יופיעו כאן{' '}
-              <strong>רק אם נשמרו כאנשי קשר</strong> בטלפון — אין חיבור ישיר
-              לאפליקציית Truecaller.
+              <strong>הכי נוח (אנדרואיד):</strong> &quot;משיחות TRUE
+              CALLER&quot; — שם ומספר מיומן השיחות (כולל זיהויים שנשמרו ביומן).
+              <strong> אנשי קשר</strong> — רשימה מתוך אנשי הקשר של המכשיר (לא
+              דרך בורר המערכת).
             </p>
             <div className="actions" style={{ flexDirection: 'column' }}>
+              {Capacitor.getPlatform() === 'android' ? (
+                <button
+                  type="button"
+                  className="btn btn-primary add-customer-truecaller-btn"
+                  style={{ width: '100%' }}
+                  onClick={openCallLogStep}
+                >
+                  <TruecallerLogoMark size={24} className="add-customer-tc-ico" />
+                  <span>
+                    משיחות TRUE CALLER — שם ומספר (מומלץ)
+                  </span>
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn"
                 style={{ width: '100%' }}
-                onClick={() => {
-                  void openNewCustomerFromDeviceContact()
-                }}
+                onClick={openContactPickStep}
               >
                 בחר מאנשי הקשר (שם + מספר)
               </button>
@@ -1868,17 +2061,6 @@ export default function App({
               </button>
               <button
                 type="button"
-                className="btn"
-                style={{ width: '100%' }}
-                onClick={() => {
-                  setPhonePasteDraft('')
-                  setAddCustomerStep('paste')
-                }}
-              >
-                מספר מהלוח (העתקה והדבקה)
-              </button>
-              <button
-                type="button"
                 className="btn btn-ghost"
                 style={{ width: '100%' }}
                 onClick={() => setAddCustomerStep(null)}
@@ -1890,56 +2072,189 @@ export default function App({
         </div>
       ) : null}
 
-      {addCustomerStep === 'paste' ? (
+      {addCustomerStep === 'contactpick' ? (
         <div
           className="overlay"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="add-paste-title"
+          aria-labelledby="add-contact-title"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setAddCustomerStep(null)
+            if (e.target === e.currentTarget) setAddCustomerStep('choose')
           }}
         >
           <motion.div
-            className="sheet"
+            className="sheet sheet--calllog"
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 320, damping: 28 }}
           >
-            <h2 id="add-paste-title">מספר מיומן השיחות</h2>
-            <ol className="muted" style={{ paddingRight: 18, margin: '0 0 12px' }}>
-              <li>פתחו את אפליקציית הטלפון ואת יומן השיחות האחרונות</li>
-              <li>לחצו לחיצה ארוכה על המספר והעתיקו</li>
-              <li>חזרו לכאן ולחצו &quot;הדבק מהלוח&quot; או הקלידו ידנית</li>
-            </ol>
-            <div className="form-grid">
-              <div>
-                <label className="field">טלפון</label>
-                <input
-                  inputMode="tel"
-                  dir="ltr"
-                  style={{ textAlign: 'left' }}
-                  value={phonePasteDraft}
-                  onChange={(e) => setPhonePasteDraft(e.target.value)}
-                  placeholder="050-1234567"
-                />
+            <h2 id="add-contact-title">בחרו איש קשר</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              מוצגת רשימה מ־אנשי הקשר של המכשיר. בחירה אחת מהמערכת (למטה) עובדת
+              גם כשהרשימה איטית או נכשלת.
+            </p>
+            {!contactPickLoading && contactPickRows.length > 0 ? (
+              <div className="form-grid" style={{ marginBottom: 10 }}>
+                <div>
+                  <label className="field" htmlFor="contact-pick-filter">
+                    חיפוש
+                  </label>
+                  <input
+                    id="contact-pick-filter"
+                    value={contactPickFilter}
+                    onChange={(e) => setContactPickFilter(e.target.value)}
+                    placeholder="שם או מספר"
+                    autoComplete="off"
+                  />
+                </div>
               </div>
+            ) : null}
+            {contactPickLoading ? (
+              <p className="muted" role="status">
+                טוען אנשי קשר…
+                {Capacitor.getPlatform() === 'android' ? (
+                  <>
+                    <br />
+                    <span>באנשי קשר כבדים זה עשוי לקחת עד כדקה.</span>
+                  </>
+                ) : null}
+              </p>
+            ) : !Capacitor.isNativePlatform() ? (
+              <p className="muted">
+                רשימה זו זמינה באפליקציית האנדרואיד/אייפון. בדפדפן השתמשו
+                ב־הזנה ידנית.
+              </p>
+            ) : null}
+            {!contactPickLoading && Capacitor.isNativePlatform() &&
+            contactPickLoadError ? (
+              <p className="contact-pick-err" role="alert">
+                {contactPickLoadError}
+              </p>
+            ) : null}
+            {!contactPickLoading &&
+            Capacitor.isNativePlatform() &&
+            !contactPickLoadError &&
+            contactPickRows.length === 0 ? (
+              <p className="muted">
+                לא נמצאו אנשי קשר עם מספר טלפון. הוסיפו בטלפון או השתמשו
+                ב־&quot;בחירה אחת מהמערכת&quot; / &quot;משיחות TRUE CALLER&quot; /
+                הזנה ידנית.
+              </p>
+            ) : null}
+            {!contactPickLoading && contactPickRows.length > 0
+              && contactPickFiltered.length === 0 ? (
+                <p className="muted">אין תוצאות שמתאימות לחיפוש.</p>
+            ) : null}
+            {!contactPickLoading && contactPickFiltered.length > 0 ? (
+              <ul className="calllog-pick-list">
+                {contactPickFiltered.map((r) => (
+                  <li key={`${r.id}-${r.phoneRaw}`}>
+                    <button
+                      type="button"
+                      className="calllog-pick-row"
+                      onClick={() => selectContactPickRow(r)}
+                    >
+                      <span className="calllog-pick-name">{r.name}</span>
+                      <span className="calllog-pick-phone" dir="ltr">
+                        {r.phoneRaw}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="actions" style={{ flexWrap: 'wrap', marginTop: 12 }}>
+              {Capacitor.isNativePlatform() ? (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    void trySystemContactPicker()
+                  }}
+                  disabled={contactPickLoading}
+                >
+                  בחירה אחת מהמערכת
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setAddCustomerStep('choose')}
+              >
+                חזרה
+              </button>
             </div>
-            <div className="actions" style={{ flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={pastePhoneFromClipboard}
-              >
-                הדבק מהלוח
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={confirmPastedPhoneCustomer}
-              >
-                המשך לכרטיס לקוח
-              </button>
+          </motion.div>
+        </div>
+      ) : null}
+
+      {addCustomerStep === 'calllog' ? (
+        <div
+          className="overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-calllog-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAddCustomerStep('choose')
+          }}
+        >
+          <motion.div
+            className="sheet sheet--calllog"
+            initial={{ y: 40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+          >
+            <h2
+              id="add-calllog-title"
+              className="sheet__titleWithLogo"
+            >
+              <TruecallerLogoMark
+                height={36}
+                className="add-customer-tc-ico"
+              />
+              <span>משיחות TRUE CALLER — בחרו שיחה</span>
+            </h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              רשימה מיומן השיחות (מספר + שם אם הופיע). לחיצה אחת פותחת כרטיס
+              מלא.
+            </p>
+            {callLogLoading ? (
+              <p className="muted">טוען…</p>
+            ) : callLogRows.length === 0 ? (
+              <p className="muted">
+                אין שיחות או שחסרה הרשאה ליומן שיחות. בדקו בהגדרות המכשיר
+                (הרשאות) או הוסיפו בדרך אחרת.
+              </p>
+            ) : (
+              <ul className="calllog-pick-list">
+                {callLogRows.map((c, idx) => (
+                  <li key={`${c.phoneRaw}-${c.dateMs}-${idx}`}>
+                    <button
+                      type="button"
+                      className="calllog-pick-row"
+                      onClick={() => selectCallLogRow(c)}
+                    >
+                      <span className="calllog-pick-name">
+                        {c.name?.trim() ? c.name : '— ללא שם —'}
+                      </span>
+                      <span className="calllog-pick-phone" dir="ltr">
+                        {c.phoneRaw}
+                      </span>
+                      <span className="calllog-pick-meta">
+                        {new Date(c.dateMs).toLocaleString('he-IL', {
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}{' '}
+                        · {callTypeLabelHe(c.type)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="actions" style={{ flexWrap: 'wrap', marginTop: 12 }}>
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -1970,8 +2285,8 @@ export default function App({
           >
             <h2 id="call-title">שיחה נכנסת</h2>
             <p className="muted">
-              רשמו מספר והערה קצרה. אפשר רק לשמור ביומן או לפתוח כרטיס לקוח
-              חדש עם אותם פרטים.
+              רשמו מספר והערה — ייפתח כרטיס לקוח חדש לפי הפרטים (ללא יומן שיחות
+              נפרד באפליקציה).
             </p>
             <div className="form-grid" style={{ marginTop: 12 }}>
               <div>
@@ -1992,7 +2307,7 @@ export default function App({
                   onChange={(e) =>
                     setCallDraft((s) => ({ ...s, note: e.target.value }))
                   }
-                  placeholder="תקלה, כתובת, שעה לחזרה..."
+                  placeholder="תקלה, כתובת, שעה לביקור..."
                 />
               </div>
             </div>
@@ -2000,13 +2315,6 @@ export default function App({
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={saveCallLogOnly}
-              >
-                שמור ביומן בלבד
-              </button>
-              <button
-                type="button"
-                className="btn"
                 onClick={startNewCustomerFromCall}
               >
                 צור לקוח חדש
@@ -2169,7 +2477,7 @@ export default function App({
                 </select>
               </div>
               <div>
-                <label className="field">תאריך חזרה</label>
+                <label className="field">תאריך ביקור</label>
                 <input
                   type="date"
                   value={customerModal.draft.callbackDate ?? ''}
@@ -2199,7 +2507,7 @@ export default function App({
                     )
                   }
                 >
-                  בלי תאריך חזרה
+                  בלי תאריך ביקור
                 </button>
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
@@ -2246,7 +2554,6 @@ export default function App({
                 type="button"
                 className="btn"
                 onClick={() => {
-                  setCallContext(null)
                   setAddCustomerStep(null)
                   setCustomerModal(null)
                 }}

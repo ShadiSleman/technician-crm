@@ -1,5 +1,23 @@
 # Deploy the API so the APK (and web) can use MongoDB from anywhere
 
+## מתי deploy ל־**שרת** (Render) — ומתי מספיק **APK / build חדש** בלבד
+
+| שינית ב… | deploy לשרת? | build APK / web חדש? |
+|-----------|-------------|------------------------|
+| קוד ב־`server/` (Routes, מודלים, לוגיקת API, `package.json` של השרת) | **כן** | רק אם גם שינית קוד React |
+| אסטרטגיית CORS, מגבלת גוף, נתיב API חדש, גרסת Node לשרת | **כן** | לפי צורך באפליקציה |
+| MongoDB, משתני סביבה ב־**Render** בלבד (`MONGO_URI`, `JWT_SECRET`, …) | **לא** (רק "Restart" / שמירת env — Render מרענן) | **לא** |
+| `src/`, `public/`, Vite, UI, לוגיקת לקוח — בלי `server/` | **לא** | **כן** (APK או `npm run build` לאתר) |
+| `.env.production` — כתובת API, `VITE_LOGIN_*` | **לא** | **כן** (הערכים נארזים ב־**build**) |
+| `public/app-config.json` (apiBase) — אם בונים בלי `VITE_API_URL` | **לא** | **כן** (הקובץ ב־`dist`) |
+
+**בקצרה:**  
+- שרת = רק שינויים שרצים ב־**Node/Express** על Render.  
+- **APK חדש** = כל שינוי ב־**אפליקציית React/Capacitor** או בקונפיג שמוטמע בבילד.  
+- שינויים **בנתונים** ב־Atlas (לקוחות, מחירון ב־workspace) = **אין** צורך ב־deploy — רק API רץ.
+
+---
+
 Your **PC at home is not on the public internet**. The **Android app** only talks to your **HTTPS API**; the API talks to **MongoDB Atlas**.
 
 ## Option A — Render (recommended; blueprint included)

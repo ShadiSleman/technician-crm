@@ -18,7 +18,7 @@ export interface Customer {
   group: WorkGroup
   status: CustomerStatus
   notes: string
-  /** תאריך לחזרה בפורמט YYYY-MM-DD (שעון מקומי) */
+  /** תאריך ביקור מתוכנן בפורמט YYYY-MM-DD (שעון מקומי); מוצג ב־UI כ«תאריך ביקור» */
   callbackDate: string | null
   createdAt: string
   updatedAt: string
@@ -61,6 +61,8 @@ export interface QuoteLine {
   description: string
   qty: number
   unitPriceInclVat: number
+  /** true אם המחיר נשמר כעריכה ידנית (לא זהה למחירון); אזהרת ״המחירון השתנה״ מתייחסת לשם/נעדרים בלבד */
+  useCustomUnitPrice?: boolean
 }
 
 export interface Quote {
@@ -85,20 +87,10 @@ export interface Meeting {
   notes: string
 }
 
-export interface CallLog {
-  id: string
-  at: string
-  direction: 'in' | 'out'
-  phone: string
-  customerId: string | null
-  note: string
-}
-
 export interface AppData {
   customers: Customer[]
   transactions: Transaction[]
   meetings: Meeting[]
-  callLogs: CallLog[]
   priceList: PriceListItem[]
   quotes: Quote[]
 }
@@ -142,7 +134,6 @@ export function emptyAppData(): AppData {
     customers: [],
     transactions: [],
     meetings: [],
-    callLogs: [],
     priceList: [],
     quotes: [],
   }

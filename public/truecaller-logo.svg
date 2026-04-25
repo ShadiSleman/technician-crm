@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" width="120" height="32" role="img" aria-hidden="true">
+  <defs>
+    <linearGradient id="tcWide" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#0a7cff"/>
+      <stop offset="55%" stop-color="#0a9fd4"/>
+      <stop offset="100%" stop-color="#0bb66a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="120" height="32" rx="9" fill="url(#tcWide)"/>
+  <!-- אייקון שפופרת — בצד שמאל, רוחב כולו של ה"פס" מרגיש מודגש -->
+  <g transform="translate(6,4) scale(0.9)">
+    <path
+      fill="#ffffff"
+      d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"
+    />
+  </g>
+  <g stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" opacity="0.35" fill="none">
+    <path d="M44 8h52M44 16h40M44 24h48"/>
+  </g>
+</svg>

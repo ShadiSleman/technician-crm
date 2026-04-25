@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { fetchAuthLogin } from '../api/authLogin'
+import { AiadLogoMark } from './AiadLogoMark'
 
 type Props = {
   apiBase: string
@@ -37,6 +38,9 @@ export function LoginScreen({ apiBase, initialError, onLoggedIn }: Props) {
   return (
     <div className="login-screen">
       <div className="login-card">
+        <div className="login-brand-mark">
+          <AiadLogoMark variant="compact" />
+        </div>
         <h1 className="login-title">התחברות לענן</h1>
         <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
           בלי כניסה, הנתונים נשמרים רק במכשיר (לא ב-Mongo). התחבר עם משתמש

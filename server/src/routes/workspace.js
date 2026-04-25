@@ -18,7 +18,6 @@ const emptyPayload = () => ({
   customers: [],
   transactions: [],
   meetings: [],
-  callLogs: [],
   priceList: [],
   quotes: [],
 })

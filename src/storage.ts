@@ -96,7 +96,6 @@ export function normalizeAppData(raw: Partial<AppData> | null): AppData {
     customers: Array.isArray(raw.customers) ? raw.customers : [],
     transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
     meetings: Array.isArray(raw.meetings) ? raw.meetings : [],
-    callLogs: Array.isArray(raw.callLogs) ? raw.callLogs : [],
     priceList: dedupePriceList(rawPl),
     quotes: Array.isArray(raw.quotes) ? raw.quotes : [],
   }
