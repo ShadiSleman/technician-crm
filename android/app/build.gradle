@@ -24,6 +24,38 @@ android {
     }
 }
 
+// שם לשיתוף APK. debug נשאר app-debug.apk (נדרש ל־`cap run android`) + עותק ממותג ליד התיקייה
+def appApkBaseName = "Mazganim-CRM"
+
+android.applicationVariants.configureEach { variant ->
+    if (variant.buildType.name == "debug") {
+        return
+    }
+    variant.outputs.configureEach { output ->
+        def vn = variant.versionName
+        def bt = variant.buildType.name
+        outputFileName = "${appApkBaseName}-v${vn}-${bt}.apk"
+    }
+}
+
+afterEvaluate {
+    tasks.named("assembleDebug").configure {
+        doLast {
+            def debugApk = file("${buildDir}/outputs/apk/debug/app-debug.apk")
+            def outDir = file("${buildDir}/outputs/apk")
+            outDir.mkdirs()
+            def branded = new File(outDir, "${appApkBaseName}.apk")
+            if (debugApk.exists()) {
+                java.nio.file.Files.copy(
+                    debugApk.toPath(),
+                    branded.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+        }
+    }
+}
+
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'

@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
   appId: 'il.technician.mazganim',
-  appName: 'מעקב לקוחות',
+  appName: 'Mazganim CRM',
   webDir: 'dist',
   android: {
     allowMixedContent: true,
